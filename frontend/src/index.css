@@ -1,0 +1,127 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --bg-cream: #FAF8F5;
+  --text-primary: #1C1917;
+  --border-subtle: #E7E5E4;
+}
+
+body {
+  background-color: #FAF8F5;
+  color: #1C1917;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Minimal subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #FAF8F5;
+}
+::-webkit-scrollbar-thumb {
+  background: #D6D3D1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #A8A29E;
+}
+
+/* Minimal Cream Surface Card */
+.card-cream {
+  background-color: #FFFFFF;
+  border: 1px solid #E7E5E4;
+  border-radius: 1rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.03), 0 1px 2px -1px rgba(0, 0, 0, 0.02);
+}
+
+.card-cream-hover {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.card-cream-hover:hover {
+  border-color: #D6D3D1;
+  box-shadow: 0 4px 12px 0 rgba(28, 25, 23, 0.05), 0 2px 4px -1px rgba(28, 25, 23, 0.03);
+}
+
+/* Form Input Preset */
+.input-cream {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  background-color: #FFFFFF;
+  border: 1px solid #D6D3D1;
+  border-radius: 0.75rem;
+  color: #1C1917;
+  font-size: 0.875rem;
+  transition: all 0.15s ease-in-out;
+}
+.input-cream:focus {
+  outline: none;
+  border-color: #78716C;
+  box-shadow: 0 0 0 3px rgba(120, 113, 108, 0.15);
+}
+.input-cream::placeholder {
+  color: #A8A29E;
+}
+
+/* Buttons */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  background-color: #1C1917;
+  color: #FFFFFF;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0.75rem;
+  transition: all 0.15s ease-in-out;
+}
+.btn-primary:hover:not(:disabled) {
+  background-color: #292524;
+}
+.btn-primary:active:not(:disabled) {
+  background-color: #0C0A09;
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  background-color: #FFFFFF;
+  border: 1px solid #D6D3D1;
+  color: #44403C;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0.75rem;
+  transition: all 0.15s ease-in-out;
+}
+.btn-secondary:hover:not(:disabled) {
+  background-color: #F5F5F4;
+  border-color: #A8A29E;
+  color: #1C1917;
+}
+
+/* Glass panel fallback mapped to clean cream card */
+.glass-panel {
+  background-color: #FFFFFF;
+  border: 1px solid #E7E5E4;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.03);
+}
+
+.glass-panel-hover:hover {
+  border-color: #D6D3D1;
+  box-shadow: 0 4px 12px 0 rgba(28, 25, 23, 0.05);
+}
