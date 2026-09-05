@@ -42,18 +42,19 @@ async def lifespan(app: FastAPI):
     # Initialize database tables with timeout protection for cloud deployment
     try:
         import asyncio
-        async with asyncio.timeout(6):
+        async def init_db():
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
             await upgrade_database_schema()
+        await asyncio.wait_for(init_db(), timeout=6.0)
         logger.info("Database schemas verified.")
     except Exception as e:
-        logger.warning(f"Database schema verification deferred: {e}")
+        logger.warning(f"Database schema verification note: {e}")
 
     # Auto-seed if admin account is missing (e.g. freshly provisioned cloud PostgreSQL)
     try:
         import asyncio
-        async with asyncio.timeout(6):
+        async def check_admin():
             from app.database.session import AsyncSessionLocal
             from sqlalchemy.future import select
             from app.models import User, UserRole
@@ -64,6 +65,7 @@ async def lifespan(app: FastAPI):
                     from seed import seed_data
                     await seed_data()
                     logger.info("Initial database seeding completed successfully.")
+        await asyncio.wait_for(check_admin(), timeout=6.0)
     except Exception as ex:
         logger.warning(f"Database auto-seed check note: {ex}")
 
