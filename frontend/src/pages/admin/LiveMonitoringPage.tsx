@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Activity, AlertTriangle, 
-  Clock, User, ExternalLink, RefreshCw, Radio
+  Clock, User, ExternalLink, RefreshCw, Radio, Cpu, Wrench
 } from 'lucide-react';
 import { apiClient } from '../../api/client';
 import { Badge } from '../../components/common/Badge';
+import { formatISTTime } from '../../utils/date';
 
 interface LiveCandidate {
   session_id: number;
@@ -17,20 +18,25 @@ interface LiveCandidate {
   progress: number;
   total_questions: number;
   status: 'ONLINE' | 'OFFLINE' | 'RECONNECTING';
+  device_tier?: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNSUPPORTED';
+  cv_status?: 'ACTIVE' | 'DEGRADED' | 'PAUSED' | 'FAILED' | 'RECOVERING';
+  cv_status_reason?: string | null;
+  network_status?: string;
   risk_level: 'LOW' | 'MEDIUM' | 'HIGH';
   risk_score: number;
   last_event: string | null;
   last_event_time: string | null;
+  is_technical_last_event?: boolean;
 }
 
 export const LiveMonitoringPage: React.FC = () => {
   const [candidates, setCandidates] = useState<LiveCandidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [connectedToWs, setConnectedToWs] = useState(false);
-  const [liveFilter, setLiveFilter] = useState<'ALL' | 'SUSPICIOUS' | 'ONLINE'>('ALL');
+  const [liveFilter, setLiveFilter] = useState<'ALL' | 'SUSPICIOUS' | 'ONLINE' | 'TECHNICAL'>('ALL');
   const wsRef = useRef<WebSocket | null>(null);
 
-  // 1. Fetch Real Database Live Candidates (No fallback dummy users)
+  // 1. Fetch Real Database Live Candidates
   const fetchLiveCandidates = async () => {
     try {
       const res = await apiClient.get<LiveCandidate[]>('/proctoring/live-candidates');
@@ -45,14 +51,33 @@ export const LiveMonitoringPage: React.FC = () => {
 
   useEffect(() => {
     fetchLiveCandidates();
-    const interval = setInterval(fetchLiveCandidates, 6000); // sync every 6 seconds
+    const interval = setInterval(fetchLiveCandidates, 6000);
     return () => clearInterval(interval);
   }, []);
 
-  // 2. Connect to WebSocket broadcast for real-time live events
+  // 2. Connect to WebSocket broadcast for real-time live events and status changes
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//localhost:8000/ws/admin/monitoring`;
+    let wsUrl = '';
+    const customWs = import.meta.env.VITE_WS_BASE_URL;
+    const apiBase = import.meta.env.VITE_API_BASE_URL;
+
+    if (customWs) {
+      wsUrl = `${customWs.replace(/\/$/, '')}/admin/monitoring`;
+    } else if (apiBase && (apiBase.startsWith('http://') || apiBase.startsWith('https://'))) {
+      try {
+        const parsed = new URL(apiBase);
+        const wsProto = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${wsProto}//${parsed.host}/ws/admin/monitoring`;
+      } catch {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.hostname || 'localhost';
+        wsUrl = `${protocol}//${host}:8000/ws/admin/monitoring`;
+      }
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.hostname || 'localhost';
+      wsUrl = `${protocol}//${host}:8000/ws/admin/monitoring`;
+    }
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -74,13 +99,16 @@ export const LiveMonitoringPage: React.FC = () => {
                     ? {
                         ...c,
                         risk_level:
-                          data.severity === 'HIGH'
+                          data.is_technical
+                            ? c.risk_level
+                            : data.severity === 'HIGH'
                             ? 'HIGH'
                             : c.risk_level === 'HIGH'
                             ? 'HIGH'
                             : 'MEDIUM',
                         last_event: `${data.event_type} (${data.duration}s)`,
                         last_event_time: 'Just now',
+                        is_technical_last_event: !!data.is_technical,
                       }
                     : c
                 );
@@ -89,11 +117,25 @@ export const LiveMonitoringPage: React.FC = () => {
                 return prev;
               }
             });
+          } else if (data.type === 'proctoring.status') {
+            setCandidates((prev) =>
+              prev.map((c) =>
+                c.session_id === data.session_id
+                  ? {
+                      ...c,
+                      device_tier: data.device_tier || c.device_tier,
+                      cv_status: data.cv_status || c.cv_status,
+                      cv_status_reason: data.cv_status_reason !== undefined ? data.cv_status_reason : c.cv_status_reason,
+                      network_status: data.network_status || c.network_status,
+                    }
+                  : c
+              )
+            );
           } else if (data.type === 'candidate.connection') {
             setCandidates((prev) =>
               prev.map((c) =>
                 c.candidate_id === data.candidate_id
-                  ? { ...c, status: data.status }
+                  ? { ...c, status: data.status, network_status: data.status === 'ONLINE' ? 'Good' : 'Offline' }
                   : c
               )
             );
@@ -118,8 +160,24 @@ export const LiveMonitoringPage: React.FC = () => {
   const filteredCandidates = candidates.filter((c) => {
     if (liveFilter === 'SUSPICIOUS') return c.risk_level === 'HIGH' || c.risk_level === 'MEDIUM';
     if (liveFilter === 'ONLINE') return c.status === 'ONLINE';
+    if (liveFilter === 'TECHNICAL') return c.cv_status === 'DEGRADED' || c.cv_status === 'FAILED' || c.is_technical_last_event;
     return true;
   });
+
+  const getCvStatusBadge = (status?: string) => {
+    switch (status) {
+      case 'DEGRADED':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">Adjusted</span>;
+      case 'FAILED':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-100 text-rose-800 border border-rose-300">Needs Attention</span>;
+      case 'RECOVERING':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-100 text-blue-800 border border-blue-300">Syncing</span>;
+      case 'PAUSED':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-stone-100 text-stone-700 border border-stone-300">Paused</span>;
+      default:
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300">Active</span>;
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -141,7 +199,7 @@ export const LiveMonitoringPage: React.FC = () => {
             </span>
           </div>
           <p className="text-stone-500 text-xs mt-0.5">
-            Real-time visual stream status, connection health, and AI-assisted risk indicators
+            Candidate status, device readiness, connection stability, and integrity alerts
           </p>
         </div>
 
@@ -155,7 +213,7 @@ export const LiveMonitoringPage: React.FC = () => {
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
 
-          {(['ALL', 'ONLINE', 'SUSPICIOUS'] as const).map((filterKey) => (
+          {(['ALL', 'ONLINE', 'SUSPICIOUS', 'TECHNICAL'] as const).map((filterKey) => (
             <button
               key={filterKey}
               onClick={() => setLiveFilter(filterKey)}
@@ -165,7 +223,7 @@ export const LiveMonitoringPage: React.FC = () => {
                   : 'bg-stone-100 text-stone-600 hover:text-stone-900 border border-stone-200'
               }`}
             >
-              {filterKey}
+              {filterKey === 'TECHNICAL' ? 'SYSTEM NOTICES' : filterKey === 'SUSPICIOUS' ? 'FLAGGED' : filterKey}
             </button>
           ))}
         </div>
@@ -181,7 +239,7 @@ export const LiveMonitoringPage: React.FC = () => {
           <Activity className="w-10 h-10 text-stone-400 mx-auto mb-2.5" />
           <h3 className="text-sm font-semibold text-stone-800">No active candidate sessions streaming</h3>
           <p className="text-xs text-stone-500 mt-1 max-w-md mx-auto">
-            When candidates start an examination in the portal, their live video feed, question progress, and automated AI proctoring telemetry will appear here in real-time.
+            When candidates start an examination in the portal, their session status, device readiness, and event updates will appear here in real-time.
           </p>
         </div>
       ) : (
@@ -191,12 +249,9 @@ export const LiveMonitoringPage: React.FC = () => {
               key={cand.session_id}
               className="card-cream card-cream-hover rounded-2xl overflow-hidden flex flex-col justify-between"
             >
-              {/* Live Camera Viewport Simulation */}
-              <div className="relative h-44 bg-stone-900 flex items-center justify-center overflow-hidden">
-                {/* Grid scanning overlay */}
-                <div className="absolute inset-0 opacity-10 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:24px_24px]" />
-
-                {/* Status HUD Overlays */}
+              {/* Header viewport area */}
+              <div className="relative h-40 bg-stone-900 flex items-center justify-center overflow-hidden">
+                {/* HUD Overlays */}
                 <div className="absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5">
                   <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full backdrop-blur-md text-[10px] font-semibold border ${
                     cand.status === 'ONLINE'
@@ -204,7 +259,7 @@ export const LiveMonitoringPage: React.FC = () => {
                       : 'bg-stone-900/80 text-stone-400 border-stone-700/60'
                   }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${cand.status === 'ONLINE' ? 'bg-emerald-400 animate-pulse' : 'bg-stone-500'}`} />
-                    <span>{cand.status === 'ONLINE' ? 'CAM ON' : 'OFFLINE'}</span>
+                    <span>{cand.status === 'ONLINE' ? 'CONNECTED' : 'OFFLINE'}</span>
                   </span>
                   <span className="px-2 py-0.5 rounded-full bg-stone-900/80 backdrop-blur-md text-[10px] font-mono text-stone-300 border border-stone-700">
                     #{cand.session_id}
@@ -213,17 +268,17 @@ export const LiveMonitoringPage: React.FC = () => {
 
                 <div className="absolute top-2.5 right-2.5 z-20">
                   <Badge
-                    label={`Risk: ${cand.risk_level}`}
+                    label={`Review Level: ${cand.risk_level}`}
                     variant={cand.risk_level === 'HIGH' ? 'danger' : cand.risk_level === 'MEDIUM' ? 'warning' : 'success'}
                     size="sm"
                     dot
                   />
                 </div>
 
-                {/* Candidate Face Avatar Frame */}
+                {/* Candidate Avatar & Identity */}
                 <div className="relative z-10 text-center">
-                  <div className="w-16 h-16 rounded-2xl bg-stone-800 border border-stone-700 flex items-center justify-center mx-auto shadow-md">
-                    <User className="w-8 h-8 text-stone-400" />
+                  <div className="w-14 h-14 rounded-2xl bg-stone-800 border border-stone-700 flex items-center justify-center mx-auto shadow-md">
+                    <User className="w-7 h-7 text-stone-400" />
                   </div>
                   <p className="text-xs font-bold text-stone-200 mt-1.5">{cand.name}</p>
                 </div>
@@ -232,7 +287,7 @@ export const LiveMonitoringPage: React.FC = () => {
                 <div className="absolute bottom-2.5 left-2.5 right-2.5 z-20 flex items-center justify-between text-[10px] text-stone-300">
                   <span className="flex items-center gap-1">
                     <Clock className="w-3 h-3 text-stone-400" />
-                    Started {new Date(cand.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    Started {formatISTTime(cand.started_at, { hour: '2-digit', minute: '2-digit' })}
                   </span>
                   <span className="text-stone-200 font-semibold font-mono">
                     {cand.progress}/{cand.total_questions} Solved
@@ -240,16 +295,52 @@ export const LiveMonitoringPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Candidate Details & Event Signal Box */}
+              {/* Candidate Details & Telemetry Matrix */}
               <div className="p-4 space-y-3">
                 <div>
                   <p className="font-bold text-xs text-stone-900 truncate">{cand.exam_title}</p>
                   <p className="text-[11px] text-stone-500 truncate">{cand.email}</p>
                 </div>
 
+                {/* Device & Integrity Card */}
+                <div className="p-2.5 rounded-xl bg-stone-50 border border-stone-200 text-xs space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-stone-500 flex items-center gap-1">
+                      <Cpu className="w-3 h-3 text-stone-600" />
+                      <span>Device Readiness:</span>
+                    </span>
+                    <span className="font-semibold text-stone-800 text-[11px]">
+                      {cand.device_tier === 'HIGH' ? 'Optimal' : cand.device_tier === 'LOW' ? 'Standard' : 'Verified'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-stone-500 flex items-center gap-1">
+                      <Activity className="w-3 h-3 text-stone-600" />
+                      <span>Proctoring Status:</span>
+                    </span>
+                    {getCvStatusBadge(cand.cv_status)}
+                  </div>
+
+                  {cand.cv_status === 'DEGRADED' && cand.cv_status_reason && (
+                    <div className="p-1.5 rounded-lg bg-amber-50 text-[10px] text-amber-800 border border-amber-200">
+                      <strong>Notice:</strong> Environment optimized for candidate device
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-0.5 border-t border-stone-200/60">
+                    <span className="text-[10px] text-stone-500">Connection:</span>
+                    <span className="text-[10px] font-medium text-emerald-700">
+                      {cand.network_status || (cand.status === 'ONLINE' ? 'Good' : 'Offline')}
+                    </span>
+                  </div>
+                </div>
+
                 {/* Last Observable Event Box */}
                 <div className={`p-2.5 rounded-xl border text-xs ${
-                  cand.risk_level === 'HIGH'
+                  cand.is_technical_last_event
+                    ? 'bg-blue-50 border-blue-200 text-blue-900'
+                    : cand.risk_level === 'HIGH'
                     ? 'bg-rose-50 border-rose-200 text-rose-800'
                     : cand.risk_level === 'MEDIUM'
                     ? 'bg-amber-50 border-amber-200 text-amber-800'
@@ -257,8 +348,14 @@ export const LiveMonitoringPage: React.FC = () => {
                 }`}>
                   <div className="flex items-center justify-between font-semibold mb-0.5">
                     <span className="flex items-center gap-1 text-[11px]">
-                      <AlertTriangle className="w-3 h-3" />
-                      <span>Latest Observed Signal</span>
+                      {cand.is_technical_last_event ? (
+                        <Wrench className="w-3 h-3 text-blue-600" />
+                      ) : (
+                        <AlertTriangle className="w-3 h-3" />
+                      )}
+                      <span>
+                        {cand.is_technical_last_event ? 'System Notice' : 'Latest Environment Alert'}
+                      </span>
                     </span>
                     <span className="text-[10px] text-stone-500">{cand.last_event_time}</span>
                   </div>
@@ -271,7 +368,7 @@ export const LiveMonitoringPage: React.FC = () => {
                     to={`/admin/proctoring/${cand.session_id}`}
                     className="btn-secondary py-1.5 px-3 text-xs flex-1 inline-flex justify-center items-center gap-1"
                   >
-                    <span>Forensic Report</span>
+                    <span>Proctoring Review</span>
                     <ExternalLink className="w-3 h-3" />
                   </Link>
                 </div>

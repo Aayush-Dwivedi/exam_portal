@@ -265,13 +265,13 @@ async def save_answer(
         "session_id": session.id,
         "candidate_id": current_user.id,
         "question_id": ans_in.question_id,
-        "timestamp": now.isoformat()
+        "timestamp": now.isoformat() + "Z"
     })
 
     return {
         "status": "saved",
         "question_id": ans_in.question_id,
-        "server_time": now.isoformat()
+        "server_time": now.isoformat() + "Z"
     }
 
 @router.post("/{session_id}/submit", response_model=Dict[str, Any])
@@ -336,7 +336,7 @@ async def submit_exam_session(
         "status": "cancelled" if actual_cancellation_reason else "submitted",
         "session_id": session.id,
         "cancellation_reason": actual_cancellation_reason,
-        "submitted_at": now.isoformat(),
+        "submitted_at": now.isoformat() + "Z",
         "total_questions": result.total_questions,
         "attempted": result.attempted,
         "score": result.score,
@@ -360,8 +360,8 @@ async def sync_session_timer(
 
     return {
         "session_id": session.id,
-        "server_time": now.isoformat(),
-        "expires_at": session.expires_at.isoformat(),
+        "server_time": now.isoformat() + "Z",
+        "expires_at": session.expires_at.isoformat() + "Z",
         "remaining_seconds": remaining_seconds,
         "status": session.status.value
     }

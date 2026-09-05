@@ -150,7 +150,7 @@ export const ExamApprovalPage: React.FC = () => {
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && fetchExams()}
             placeholder="Search exams by title..."
-            className="input-cream pl-9 py-2 text-xs"
+            className="input-cream pl-10 py-2 text-xs"
           />
         </div>
 
@@ -314,7 +314,6 @@ export const ExamApprovalPage: React.FC = () => {
                         {q.question_text}
                       </p>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <Badge label={q.difficulty} size="sm" variant={q.difficulty === 'EASY' ? 'success' : q.difficulty === 'MEDIUM' ? 'warning' : 'danger'} />
                         <span className="text-xs text-stone-500 font-mono">+{q.marks} / -{q.negative_marks}</span>
                       </div>
                     </div>

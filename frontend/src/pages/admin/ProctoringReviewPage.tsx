@@ -8,6 +8,7 @@ import { apiClient } from '../../api/client';
 import { ProctoringReport, ProctoringEvent, ReviewStatus } from '../../types';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
+import { formatISTTime, parseToDate } from '../../utils/date';
 
 export const ProctoringReviewPage: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -66,14 +67,17 @@ export const ProctoringReviewPage: React.FC = () => {
 
   const handleSeekVideoToEvent = (event: ProctoringEvent) => {
     if (!videoRef.current || !report) return;
-    const evTime = new Date(event.timestamp).getTime();
-    if (report.events.length > 0) {
-      const firstTime = new Date(report.events[0].timestamp).getTime();
-      const offsetSeconds = Math.max(0, (evTime - firstTime) / 1000);
-      videoRef.current.currentTime = offsetSeconds;
-      videoRef.current.play();
-    }
+    const evTime = parseToDate(event.timestamp)?.getTime() || 0;
+    const baseTime = report.started_at
+      ? (parseToDate(report.started_at)?.getTime() || evTime)
+      : report.events.length > 0
+      ? (parseToDate(report.events[0].timestamp)?.getTime() || evTime)
+      : evTime;
+    const offsetSeconds = Math.max(0, (evTime - baseTime) / 1000);
+    videoRef.current.currentTime = offsetSeconds;
+    videoRef.current.play().catch(() => {});
   };
+
 
   const handleSpeedChange = (rate: number) => {
     setPlaybackRate(rate);
@@ -87,7 +91,7 @@ export const ProctoringReviewPage: React.FC = () => {
       case 'PHONE_DETECTED':
         return <Badge label="Phone Detected" variant="danger" size="sm" dot />;
       case 'SPOOF_DETECTED':
-        return <Badge label="2D Spoof Detected" variant="danger" size="sm" dot />;
+        return <Badge label="Display Anomaly" variant="danger" size="sm" dot />;
       case 'MULTIPLE_FACES':
         return <Badge label="Multiple Faces" variant="danger" size="sm" dot />;
       case 'CAMERA_BLOCKED':
@@ -100,13 +104,26 @@ export const ProctoringReviewPage: React.FC = () => {
         return <Badge label="Eye Gaze Anomaly" variant="warning" size="sm" dot />;
       case 'AUDIO_DISTURBANCE':
         return <Badge label="Audio Disturbance" variant="warning" size="sm" dot />;
+      case 'CAMERA_DISCONNECTED':
+        return <Badge label="Camera Disconnected" variant="neutral" size="sm" dot />;
+      case 'MICROPHONE_DISCONNECTED':
+        return <Badge label="Mic Disconnected" variant="neutral" size="sm" dot />;
+      case 'NETWORK_INTERRUPTION':
+        return <Badge label="Network Interruption" variant="neutral" size="sm" dot />;
+      case 'CV_PERFORMANCE_DEGRADED':
+        return <Badge label="System Notice" variant="neutral" size="sm" dot />;
+      case 'BROWSER_TAB_HIDDEN':
+        return <Badge label="Tab Hidden" variant="warning" size="sm" dot />;
       default:
         return <Badge label={type} variant="neutral" size="sm" />;
     }
   };
 
+  const token = localStorage.getItem('access_token');
   const recordingStreamUrl = report?.recording_url 
-    ? (report.recording_url.startsWith('http') ? report.recording_url : `http://127.0.0.1:8000${report.recording_url}`)
+    ? (report.recording_url.startsWith('http') 
+        ? `${report.recording_url}${token ? `${report.recording_url.includes('?') ? '&' : '?'}token=${token}` : ''}` 
+        : `http://127.0.0.1:8000${report.recording_url}${token ? `?token=${token}` : ''}`)
     : null;
 
   return (
@@ -123,10 +140,10 @@ export const ProctoringReviewPage: React.FC = () => {
           <div>
             <h1 className="text-xl font-bold text-stone-900 tracking-tight flex items-center gap-2">
               <ShieldAlert className="w-5 h-5 text-stone-700" />
-              Proctoring Forensic Review & Video Audit
+              Session Proctoring & Video Review
             </h1>
             <p className="text-stone-500 text-xs mt-0.5">
-              Session #{sessionId} Forensic Video Replay & AI Signal Verification
+              Session #{sessionId} Video Replay & Flagged Event Verification
             </p>
           </div>
         </div>
@@ -143,13 +160,13 @@ export const ProctoringReviewPage: React.FC = () => {
         )}
       </div>
 
-      {/* AI Transparency Notice Banner */}
+      {/* Review Policy Notice Banner */}
       <div className="p-3.5 rounded-xl bg-stone-50 border border-stone-200 text-stone-700 text-xs flex items-start gap-2.5">
         <Info className="w-4 h-4 text-stone-500 flex-shrink-0 mt-0.5" />
         <div>
-          <strong className="font-semibold text-stone-900">AI-Assisted Decision Support Policy:</strong>
+          <strong className="font-semibold text-stone-900">Integrity Review Policy:</strong>
           <p className="mt-0.5 text-stone-600 leading-relaxed">
-            Recorded video and computer vision events are legal-grade decision-support evidence. They assist human proctors and do not constitute automatic disqualification. Review the synchronized video replay before confirming violations.
+            Recorded video and integrity events provide decision-support for human reviewers. Flagged events do not constitute automatic disqualification. Review the synchronized video replay before confirming any integrity warnings.
           </p>
         </div>
       </div>
@@ -164,9 +181,11 @@ export const ProctoringReviewPage: React.FC = () => {
         <div className="space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="card-cream p-4 rounded-xl">
-              <span className="text-[10px] font-semibold text-stone-500 uppercase tracking-wider">Candidate</span>
+              <span className="text-[10px] font-semibold text-stone-500 uppercase tracking-wider">Candidate & Device</span>
               <p className="text-sm font-bold text-stone-900 mt-0.5">{report.candidate_name}</p>
-              <p className="text-xs text-stone-500 truncate">{report.candidate_email}</p>
+              <p className="text-xs text-stone-500">
+                System: {report.device_tier === 'HIGH' ? 'Optimal' : report.device_tier === 'LOW' ? 'Standard' : 'Verified'} · Proctoring: {report.cv_status === 'DEGRADED' ? 'Adjusted' : (report.cv_status || 'Active')}
+              </p>
             </div>
 
             <div className="card-cream p-4 rounded-xl">
@@ -176,10 +195,10 @@ export const ProctoringReviewPage: React.FC = () => {
             </div>
 
             <div className="card-cream p-4 rounded-xl">
-              <span className="text-[10px] font-semibold text-stone-500 uppercase tracking-wider">Total Infractions</span>
+              <span className="text-[10px] font-semibold text-stone-500 uppercase tracking-wider">Observed Events</span>
               <p className="text-xl font-bold text-stone-900 mt-0.5">{report.total_events}</p>
               <p className="text-xs text-stone-500">
-                {report.high_severity_events} High · {report.medium_severity_events} Med · {report.low_severity_events} Low
+                {report.total_events - (report.technical_events_count || 0)} Warnings · {report.technical_events_count || 0} Notices
               </p>
             </div>
 
@@ -190,7 +209,7 @@ export const ProctoringReviewPage: React.FC = () => {
                 ? 'bg-amber-50/50 border-amber-200'
                 : 'bg-emerald-50/50 border-emerald-200'
             }`}>
-              <span className="text-[10px] font-semibold text-stone-500 uppercase tracking-wider">Risk Signal</span>
+              <span className="text-[10px] font-semibold text-stone-500 uppercase tracking-wider">Integrity Review Index</span>
               <div className="flex items-baseline gap-2 mt-0.5">
                 <span className="text-xl font-bold text-stone-900">{report.risk_score} / 100</span>
                 <Badge
@@ -203,7 +222,7 @@ export const ProctoringReviewPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Forensic Video Replay Player */}
+          {/* Synchronized Video Session Player */}
           <div className="card-cream p-5 sm:p-6 rounded-2xl">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3.5 pb-3 border-b border-stone-100">
               <div className="flex items-center gap-2">
@@ -211,7 +230,7 @@ export const ProctoringReviewPage: React.FC = () => {
                   <Video className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm text-stone-900">Synchronized Video Forensic Audit Player</h3>
+                  <h3 className="font-bold text-sm text-stone-900">Synchronized Video Session Player</h3>
                   <p className="text-xs text-stone-500">Continuous webcam recording stored securely for verification</p>
                 </div>
               </div>
@@ -258,17 +277,17 @@ export const ProctoringReviewPage: React.FC = () => {
                 )}
               </div>
 
-              {/* Video & AI Event Jump Links */}
+              {/* Video & Event Jump Links */}
               <div className="space-y-2.5">
                 <h4 className="text-[11px] font-bold uppercase tracking-wider text-stone-600 flex items-center gap-1.5">
                   <Play className="w-3 h-3 text-stone-700" />
-                  Jump to Violation Timestamp
+                  Jump to Event Timestamp
                 </h4>
 
                 <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                   {report.events.length === 0 ? (
                     <div className="p-3.5 rounded-xl bg-stone-50 border border-stone-200 text-center text-xs text-stone-500">
-                      No violations recorded in this session.
+                      No flagged events recorded in this session.
                     </div>
                   ) : (
                     report.events.map((ev) => (
@@ -281,7 +300,7 @@ export const ProctoringReviewPage: React.FC = () => {
                           <div className="flex items-center gap-1.5">
                             {getEventBadge(ev.event_type)}
                             <span className="text-[10px] font-mono text-stone-500">
-                              {new Date(ev.timestamp).toLocaleTimeString()}
+                              {formatISTTime(ev.timestamp)}
                             </span>
                           </div>
                           <p className="text-[11px] text-stone-600">
@@ -320,7 +339,7 @@ export const ProctoringReviewPage: React.FC = () => {
                     <th className="py-3 px-4">Confidence</th>
                     <th className="py-3 px-4">Review Status</th>
                     <th className="py-3 px-4">Admin Notes</th>
-                    <th className="py-3 px-4 text-right">Audit Action</th>
+                    <th className="py-3 px-4 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
@@ -334,7 +353,7 @@ export const ProctoringReviewPage: React.FC = () => {
                     report.events.map((ev) => (
                       <tr key={ev.id} className="hover:bg-stone-50/60 transition-colors">
                         <td className="py-3 px-4 font-mono text-stone-700">
-                          {new Date(ev.timestamp).toLocaleTimeString()}
+                          {formatISTTime(ev.timestamp)}
                         </td>
                         <td className="py-3 px-4">
                           {getEventBadge(ev.event_type)}
@@ -406,7 +425,7 @@ export const ProctoringReviewPage: React.FC = () => {
                 <span className="font-mono text-stone-900 font-medium">{selectedEvent.duration} seconds</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-stone-600">Model Confidence:</span>
+                <span className="text-stone-600">Detection Confidence:</span>
                 <span className="font-mono text-stone-900 font-medium">{Math.round(selectedEvent.confidence * 100)}%</span>
               </div>
             </div>

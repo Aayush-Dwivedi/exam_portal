@@ -1,11 +1,25 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Union
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel as _PydanticBaseModel, EmailStr, Field, ConfigDict, field_serializer
 from app.models import (
     UserRole, UserStatus, ExamStatus, QuestionType, 
     DifficultyLevel, SessionStatus, ProctoringEventType, 
     EventSeverity, ReviewStatus
 )
+
+class BaseModel(_PydanticBaseModel):
+    """
+    Base model for all API schemas. Ensures naive UTC datetimes
+    are serialized with explicit 'Z' suffix to guarantee accurate
+    IST (+05:30) client conversion across browsers.
+    """
+    @field_serializer('*', mode='plain', check_fields=False, when_used='json')
+    def serialize_datetimes_utc(self, val, info):
+        if isinstance(val, datetime):
+            if val.tzinfo is None:
+                val = val.replace(tzinfo=timezone.utc)
+            return val.isoformat().replace('+00:00', 'Z')
+        return val
 
 # ----------------- AUTH SCHEMAS -----------------
 
@@ -34,6 +48,15 @@ class RegisterRequest(BaseModel):
     roll_number: Optional[str] = None
     password: str = Field(..., min_length=6)
     role: UserRole = UserRole.CANDIDATE
+
+class DemoCandidateResponse(BaseModel):
+    user_id: int
+    name: str
+    email: str
+    roll_number: str
+    password: str
+    role: UserRole = UserRole.CANDIDATE
+    enrolled_exams_count: int = 0
 
 # ----------------- USER SCHEMAS -----------------
 
@@ -347,6 +370,11 @@ class ProctoringSessionReport(BaseModel):
     risk_score: int
     risk_level: str # LOW, MEDIUM, HIGH
     recording_url: Optional[str] = None
+    started_at: Optional[datetime] = None
+    device_tier: Optional[str] = "MEDIUM"
+    cv_status: Optional[str] = "ACTIVE"
+    cv_status_reason: Optional[str] = None
+    technical_events_count: Optional[int] = 0
     events: List[ProctoringEventOut]
 
 # ----------------- AUDIT LOG SCHEMAS -----------------

@@ -149,8 +149,8 @@ class ProctoringEventEngine:
             else:
                 elapsed = current_time - self.active_conditions[condition_name]
                 last_emitted = self.emitted_cooldowns.get(condition_name, 0)
-                
-                if elapsed >= threshold_seconds and (current_time - last_emitted) >= 5.0: # 5 sec cooldown between alerts
+                cooldown = getattr(self.config, "EVENT_COOLDOWN_SECONDS", 5.0)
+                if elapsed >= threshold_seconds and (current_time - last_emitted) >= cooldown:
                     self.emitted_cooldowns[condition_name] = current_time
                     return {
                         "event_type": condition_name,

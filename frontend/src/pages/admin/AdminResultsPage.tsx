@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Award, Search, CheckCircle2, Clock, ShieldAlert, Eye, Check, X, Send } from 'lucide-react';
+import { Award, Search, CheckCircle2, Clock, ShieldAlert, Eye, Check, X, Send, Trash2 } from 'lucide-react';
 import { apiClient } from '../../api/client';
 import { Result } from '../../types';
 import { Badge } from '../../components/common/Badge';
@@ -12,6 +12,7 @@ export const AdminResultsPage: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'PUBLISHED' | 'PENDING'>('ALL');
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [purging, setPurging] = useState(false);
 
   const fetchResults = async () => {
     try {
@@ -22,6 +23,22 @@ export const AdminResultsPage: React.FC = () => {
       console.error('Failed to fetch results', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePurgeHistory = async () => {
+    if (!window.confirm("Are you sure you want to delete all past exam attempts, results, proctoring trackings, and recordings? The question bank, exams, and user credentials will NOT be affected.")) {
+      return;
+    }
+    try {
+      setPurging(true);
+      await apiClient.post('/results/purge-history');
+      await fetchResults();
+      alert("Exam history and trackings successfully cleared!");
+    } catch (err: any) {
+      alert(err.response?.data?.detail || "Failed to clear exam history.");
+    } finally {
+      setPurging(false);
     }
   };
 
@@ -105,6 +122,16 @@ export const AdminResultsPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={handlePurgeHistory}
+            disabled={purging}
+            className="py-2 px-3 text-xs font-semibold rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 transition-colors flex items-center gap-1.5 shadow-xs"
+            title="Purge all past test attempts, results, and proctoring recordings"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+            <span>{purging ? 'Purging History...' : 'Clear Exam History'}</span>
+          </button>
+
           {pendingCount > 0 && (
             <button
               onClick={handlePublishAll}
@@ -127,7 +154,7 @@ export const AdminResultsPage: React.FC = () => {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search candidate, email, or exam title..."
-            className="input-cream pl-9 py-2 text-xs w-full"
+            className="input-cream pl-10 py-2 text-xs w-full"
           />
         </div>
 

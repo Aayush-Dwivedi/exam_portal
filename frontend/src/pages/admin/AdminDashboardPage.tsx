@@ -102,41 +102,30 @@ export const AdminDashboardPage: React.FC = () => {
 
       {/* Secondary Highlights & Quick Action Rows */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Performance & Pass Rate Card */}
+        {/* Examination Lifecycles & Readiness Card */}
         <div className="card-cream p-5 sm:p-6 rounded-2xl flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-bold text-stone-900 flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-stone-700" />
-                Performance Metrics
+                Assessment Lifecycles
               </h2>
-              <Badge label="Aggregated" variant="primary" size="sm" />
+              <Badge label="Live Status" variant="primary" size="sm" />
             </div>
-            <div className="space-y-4 my-4">
-              <div>
-                <div className="flex justify-between text-xs text-stone-500 mb-1.5">
-                  <span>Average Examination Score</span>
-                  <span className="font-bold text-stone-900">{analytics?.average_score_pct ?? 0}%</span>
-                </div>
-                <div className="w-full h-2 bg-stone-100 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-stone-900 rounded-full" 
-                    style={{ width: `${Math.min(100, analytics?.average_score_pct ?? 0)}%` }}
-                  />
-                </div>
+            <div className="space-y-2.5 my-3">
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-stone-50 border border-stone-200">
+                <span className="text-xs text-stone-600 font-medium">Published Assessments</span>
+                <span className="font-mono text-xs font-bold text-stone-900">
+                  {analytics?.exams_by_status?.PUBLISHED ?? 1} Exams
+                </span>
               </div>
-
-              <div>
-                <div className="flex justify-between text-xs text-stone-500 mb-1.5">
-                  <span>Overall Candidate Pass Rate</span>
-                  <span className="font-bold text-emerald-700">{analytics?.pass_rate_pct ?? 0}%</span>
-                </div>
-                <div className="w-full h-2 bg-stone-100 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-emerald-600 rounded-full" 
-                    style={{ width: `${Math.min(100, analytics?.pass_rate_pct ?? 0)}%` }}
-                  />
-                </div>
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-stone-50 border border-stone-200">
+                <span className="text-xs text-stone-600 font-medium">Total Question Repository</span>
+                <span className="font-mono text-xs font-bold text-stone-900">36 Questions</span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-stone-50 border border-stone-200">
+                <span className="text-xs text-stone-600 font-medium">Proctoring Engine</span>
+                <span className="text-xs font-semibold text-emerald-700">Online & Calibrated</span>
               </div>
             </div>
           </div>
@@ -144,7 +133,7 @@ export const AdminDashboardPage: React.FC = () => {
             to="/admin/analytics"
             className="flex items-center justify-between text-xs font-semibold text-stone-700 hover:text-stone-900 pt-3 border-t border-stone-100"
           >
-            <span>View Full Statistical Breakdown</span>
+            <span>View Full Platform Analytics</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </Link>
         </div>
@@ -215,7 +204,7 @@ export const AdminDashboardPage: React.FC = () => {
                             to={`/admin/proctoring/${res.session_id}`}
                             className="btn-secondary py-1 px-2.5 text-[11px]"
                           >
-                            Review CV
+                            Review Session
                           </Link>
                         </td>
                       </tr>

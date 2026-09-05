@@ -7,6 +7,7 @@ import {
 import { apiClient } from '../../api/client';
 import { Result } from '../../types';
 import { Badge } from '../../components/common/Badge';
+import { formatISTDateTime } from '../../utils/date';
 
 export const CandidateResultDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -136,7 +137,7 @@ export const CandidateResultDetailPage: React.FC = () => {
           />
           <h2 className="text-xl font-bold text-stone-900 tracking-tight">{result.exam_title}</h2>
           <p className="text-xs text-stone-500">
-            Completed on {new Date(result.created_at).toLocaleDateString()} at {new Date(result.created_at).toLocaleTimeString()}
+            Completed on {formatISTDateTime(result.created_at)}
           </p>
         </div>
 

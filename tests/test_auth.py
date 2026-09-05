@@ -50,3 +50,33 @@ async def test_candidate_registration_disabled(client):
     )
     # Self registration must be rejected with 403 Forbidden
     assert response.status_code == 403
+
+@pytest.mark.asyncio
+async def test_create_demo_candidate_and_login(client):
+    # 1. Generate demo candidate
+    res1 = await client.post("/api/auth/demo-candidate")
+    assert res1.status_code == 200
+    data1 = res1.json()
+    assert "roll_number" in data1
+    assert data1["roll_number"].startswith("DEMO-")
+    assert "password" in data1
+    assert data1["role"] == "CANDIDATE"
+    assert "user_id" in data1
+
+    # 2. Authenticate using the generated credentials
+    login_res = await client.post(
+        "/api/auth/login",
+        json={"identifier": data1["roll_number"], "password": data1["password"]}
+    )
+    assert login_res.status_code == 200
+    login_data = login_res.json()
+    assert "access_token" in login_data
+    assert login_data["role"] == "CANDIDATE"
+    assert login_data["roll_number"] == data1["roll_number"]
+
+    # 3. Generate a second demo candidate and verify uniqueness
+    res2 = await client.post("/api/auth/demo-candidate")
+    assert res2.status_code == 200
+    data2 = res2.json()
+    assert data2["roll_number"] != data1["roll_number"]
+    assert data2["email"] != data1["email"]

@@ -18,6 +18,7 @@ import {
   isCurrentlyFullscreen,
   requestFullscreenSafe
 } from '../../utils/hardware';
+import { formatISTTime, parseToDate } from '../../utils/date';
 
 export const ExamRoomPage: React.FC = () => {
   const { examId } = useParams<{ examId: string }>();
@@ -138,19 +139,21 @@ export const ExamRoomPage: React.FC = () => {
           setActiveSectionId(data.sections[0].id);
         }
 
-        // Initialize live OpenCV proctoring monitor
+        // Initialize lightweight CPU proctoring monitor with candidate's detected tier
+        const detectedTier = (sessionStorage.getItem('exam_device_tier') as any) || 'MEDIUM';
         const monitor = new ClientProctoringMonitor(
           data.session_id,
           data.candidate_id ?? 0,
           (state) => {
             setProctorState(state);
-          }
+          },
+          detectedTier
         );
         monitorRef.current = monitor;
 
         // Initialize timer from server
-        const now = new Date(data.server_time).getTime();
-        const expires = new Date(data.expires_at).getTime();
+        const now = parseToDate(data.server_time)?.getTime() || Date.now();
+        const expires = parseToDate(data.expires_at)?.getTime() || now;
         const diffSec = Math.max(0, Math.floor((expires - now) / 1000));
         setRemainingSeconds(diffSec);
 
@@ -234,10 +237,26 @@ export const ExamRoomPage: React.FC = () => {
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          try {
+            await videoRef.current.play();
+          } catch {}
+
+          if (!monitorRef.current && sessionData) {
+            const detectedTier = (sessionStorage.getItem('exam_device_tier') as any) || 'MEDIUM';
+            monitorRef.current = new ClientProctoringMonitor(
+              sessionData.session_id,
+              sessionData.candidate_id ?? 0,
+              (state) => {
+                setProctorState(state);
+              },
+              detectedTier
+            );
+          }
+
           if (monitorRef.current) {
             monitorRef.current.attachVideo(videoRef.current);
             monitorRef.current.attachAudio(stream);
-            monitorRef.current.startMonitoring(1200);
+            monitorRef.current.startMonitoring();
             monitorRef.current.startRecording(stream);
           }
         }
@@ -252,10 +271,9 @@ export const ExamRoomPage: React.FC = () => {
 
     return () => {
       isCancelled = true;
-      // Do NOT call exitFullscreenSafe here — it fires on sessionData load and breaks fullscreen!
-      stopHardware();
     };
-  }, [sessionData, stopHardware]);
+  }, [sessionData]);
+
 
   // Dedicated unmount teardown (do NOT exit fullscreen here as StrictMode fires cleanup on initial mount!)
   useEffect(() => {
@@ -501,9 +519,19 @@ export const ExamRoomPage: React.FC = () => {
 
   const currentQuestion: Question | undefined = sessionData?.questions[currentQIndex];
 
-  // Save current answer to backend
+  // Save current answer to backend with local resilience
   const saveCurrentAnswerToCloud = useCallback(async (qId: number, currentAns: any) => {
     if (!sessionData) return;
+
+    // 1. Always back up to local storage first so answers are never lost
+    try {
+      const storageKey = `offline_answers_${sessionData.session_id}`;
+      const existing = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      existing[qId] = currentAns;
+      localStorage.setItem(storageKey, JSON.stringify(existing));
+    } catch {}
+
+    // 2. Transmit to server
     try {
       setIsSaving(true);
       await apiClient.post(`/exam-sessions/${sessionData.session_id}/answers`, {
@@ -512,14 +540,42 @@ export const ExamRoomPage: React.FC = () => {
         answer_text: currentAns.answer_text,
         is_marked_review: currentAns.is_marked_review,
       });
-      setLastSavedTime(new Date().toLocaleTimeString());
+      setLastSavedTime(formatISTTime(new Date()));
       setNetworkStatus('ONLINE');
     } catch (e) {
-      console.warn('Autosave offline fallback', e);
+      console.warn('Autosave offline fallback - preserved in local storage', e);
       setNetworkStatus('OFFLINE');
     } finally {
       setIsSaving(false);
     }
+  }, [sessionData]);
+
+  // Synchronize offline answers upon reconnection
+  useEffect(() => {
+    const handleReconnectSync = async () => {
+      if (!sessionData) return;
+      setNetworkStatus('ONLINE');
+      try {
+        const storageKey = `offline_answers_${sessionData.session_id}`;
+        const stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        const qIds = Object.keys(stored);
+        for (const qIdStr of qIds) {
+          const qId = parseInt(qIdStr);
+          const ans = stored[qId];
+          await apiClient.post(`/exam-sessions/${sessionData.session_id}/answers`, {
+            question_id: qId,
+            selected_option: ans.selected_option,
+            answer_text: ans.answer_text,
+            is_marked_review: ans.is_marked_review,
+          });
+        }
+      } catch (e) {
+        console.warn('Sync offline answers error', e);
+      }
+    };
+
+    window.addEventListener('online', handleReconnectSync);
+    return () => window.removeEventListener('online', handleReconnectSync);
   }, [sessionData]);
 
   // Handle Option Select
@@ -808,14 +864,14 @@ export const ExamRoomPage: React.FC = () => {
             </div>
             <div>
               <span className="font-extrabold uppercase tracking-wide mr-1.5">
-                [{proctorState.warningSeverity === 'HIGH' ? 'Critical Alert' : 'Integrity Prompt'}]
+                [{proctorState.warningSeverity === 'HIGH' ? 'Review Warning' : 'Reminder'}]
               </span>
               <span>{proctorState.warningMessage}</span>
             </div>
           </div>
           {proctorState.violationCount > 0 && (
             <span className="px-2 py-0.5 rounded-full bg-black/20 text-[10px] font-mono font-bold">
-              Signals: {proctorState.violationCount}
+              Warnings: {proctorState.violationCount}
             </span>
           )}
         </div>
@@ -969,15 +1025,33 @@ export const ExamRoomPage: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
                 <Camera className="w-3.5 h-3.5 text-emerald-700" />
-                Live CV Proctor Stream
+                Exam Proctoring
               </span>
-              <span className="text-[10px] font-mono text-emerald-700 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                Active
+              <span className={`text-[10px] font-mono flex items-center gap-1 font-semibold ${
+                proctorState.cameraBlocked || proctorState.faceCount === 0
+                  ? 'text-rose-700'
+                  : 'text-emerald-700'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  proctorState.cameraBlocked || proctorState.faceCount === 0
+                    ? 'bg-rose-500 animate-ping'
+                    : 'bg-emerald-600 animate-pulse'
+                }`} />
+                {proctorState.cameraBlocked
+                  ? 'Camera Occluded'
+                  : proctorState.faceCount === 0
+                  ? 'Adjust Position'
+                  : 'Active'}
               </span>
             </div>
 
-            <div className="relative aspect-video rounded-xl bg-stone-950 border border-stone-200 overflow-hidden group">
+            <div className={`relative aspect-video rounded-xl bg-stone-950 border-2 overflow-hidden group transition-all duration-300 ${
+              proctorState.cameraBlocked || proctorState.faceCount === 0
+                ? 'border-rose-500 ring-2 ring-rose-500/30'
+                : proctorState.faceCount > 1 || proctorState.lookingAway
+                ? 'border-amber-500'
+                : 'border-stone-700/50'
+            }`}>
               <video
                 ref={videoRef}
                 autoPlay
@@ -986,16 +1060,46 @@ export const ExamRoomPage: React.FC = () => {
                 className="w-full h-full object-cover transform -scale-x-100"
               />
 
-              {/* Minimal Clean Overlay: Only Candidate Roll Number */}
-              {user?.roll_number && (
-                <div className="absolute bottom-2 left-2 z-20">
+              {/* Dynamic Live Status Overlay Badge directly over video */}
+              <div className="absolute top-2 left-2 z-20 pointer-events-none">
+                {proctorState.cameraBlocked ? (
+                  <span className="px-2 py-0.5 rounded bg-rose-950/90 text-rose-200 font-mono text-[10px] font-bold border border-rose-500 flex items-center gap-1.5 animate-pulse shadow-md">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                    CAMERA COVERED
+                  </span>
+                ) : proctorState.faceCount === 0 ? (
+                  <span className="px-2 py-0.5 rounded bg-rose-950/90 text-rose-200 font-mono text-[10px] font-bold border border-rose-500 flex items-center gap-1.5 animate-pulse shadow-md">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                    PLEASE FACE CAMERA
+                  </span>
+                ) : proctorState.faceCount > 1 ? (
+                  <span className="px-2 py-0.5 rounded bg-rose-950/90 text-rose-200 font-mono text-[10px] font-bold border border-rose-500 flex items-center gap-1 shadow-md">
+                    MULTIPLE PEOPLE DETECTED
+                  </span>
+                ) : proctorState.lookingAway ? (
+                  <span className="px-2 py-0.5 rounded bg-amber-950/90 text-amber-200 font-mono text-[10px] font-bold border border-amber-500 flex items-center gap-1 shadow-md">
+                    FOCUS ON SCREEN
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 font-mono text-[10px] font-medium border border-emerald-500/40 flex items-center gap-1 shadow-xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    Active
+                  </span>
+                )}
+              </div>
+
+              {/* Candidate Identifier Overlay */}
+              <div className="absolute bottom-2 left-2 right-2 z-20 flex items-center justify-between pointer-events-none">
+                {user?.roll_number ? (
                   <span className="px-2 py-0.5 rounded-md bg-stone-900/90 text-stone-200 font-mono text-[10px] font-semibold border border-stone-700/80 shadow-xs">
                     {user.roll_number}
                   </span>
-                </div>
-              )}
+                ) : <span />}
+              </div>
             </div>
           </div>
+
+
 
           {/* Question Palette */}
           <div className="card-cream p-4 sm:p-5 rounded-2xl space-y-3">

@@ -8,6 +8,7 @@ import { apiClient } from '../../api/client';
 import { Result } from '../../types';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
+import { formatISTDateTime } from '../../utils/date';
 
 export const CandidateResultsPage: React.FC = () => {
   const [results, setResults] = useState<Result[]>([]);
@@ -125,7 +126,7 @@ export const CandidateResultsPage: React.FC = () => {
                           {r.exam_title}
                         </td>
                         <td className="py-3.5 px-4 text-stone-500 font-mono text-[11px]">
-                          {new Date(r.created_at).toLocaleDateString()} at {new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {formatISTDateTime(r.created_at)}
                         </td>
                         <td className="py-3.5 px-4">
                           {r.session_status === 'CANCELLED' ? (

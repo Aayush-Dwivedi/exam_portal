@@ -4,11 +4,23 @@ from sqlalchemy.future import select
 from app.models import ProctoringEvent, ProctoringEventType, EventSeverity, ReviewStatus
 from app.core.config import settings
 
+TECHNICAL_EVENT_TYPES = {
+    ProctoringEventType.CAMERA_DISCONNECTED,
+    ProctoringEventType.MICROPHONE_DISCONNECTED,
+    ProctoringEventType.NETWORK_INTERRUPTION,
+    ProctoringEventType.CV_PERFORMANCE_DEGRADED,
+    ProctoringEventType.BROWSER_TAB_HIDDEN,
+}
+
+def is_technical_event(event_type: ProctoringEventType) -> bool:
+    return event_type in TECHNICAL_EVENT_TYPES
+
 def calculate_risk_signal(events: List[ProctoringEvent]) -> Tuple[int, str]:
     """
     Computes an AI-assisted Risk Signal Score (0-100) and Level (LOW, MEDIUM, HIGH)
-    from recorded proctoring events.
-    Does NOT accuse of cheating; prioritizes administrative review.
+    from recorded examination environment events.
+    Excludes technical performance events (disconnections, latency degradation).
+    Does NOT declare cheating; strictly assists and prioritizes human review.
     """
     raw_score = 0
     
@@ -21,15 +33,27 @@ def calculate_risk_signal(events: List[ProctoringEvent]) -> Tuple[int, str]:
         ProctoringEventType.AUDIO_DISTURBANCE: settings.WEIGHT_AUDIO_DISTURBANCE,
         ProctoringEventType.EYE_TRACKING_ANOMALY: settings.WEIGHT_EYE_TRACKING_ANOMALY,
         ProctoringEventType.PERSON_ENTERED_FRAME: 25,
-        ProctoringEventType.UNKNOWN_OBJECT: 20
+        ProctoringEventType.UNKNOWN_OBJECT: 20,
+        # Technical events explicitly set to 0 weight
+        ProctoringEventType.CAMERA_DISCONNECTED: 0,
+        ProctoringEventType.MICROPHONE_DISCONNECTED: 0,
+        ProctoringEventType.NETWORK_INTERRUPTION: 0,
+        ProctoringEventType.CV_PERFORMANCE_DEGRADED: 0,
+        ProctoringEventType.BROWSER_TAB_HIDDEN: 0,
     }
 
     for ev in events:
         # If admin dismissed the event, ignore it from risk score
         if ev.review_status == ReviewStatus.DISMISSED:
             continue
+        
+        # Technical events do not contribute to cheating risk
+        if is_technical_event(ev.event_type):
+            continue
             
         base_weight = weights.get(ev.event_type, 10)
+        if base_weight == 0:
+            continue
         # Factor in confidence and duration multiplier (capped)
         duration_multiplier = min(2.0, max(1.0, ev.duration / 3.0))
         confidence_factor = max(0.5, ev.confidence)

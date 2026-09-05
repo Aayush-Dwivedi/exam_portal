@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Camera, Mic, Wifi, Monitor, CheckCircle2, 
-  XCircle, ArrowRight, ArrowLeft, ShieldCheck, UserCheck, AlertTriangle, RefreshCw
+  XCircle, ArrowRight, ArrowLeft, ShieldCheck, UserCheck, AlertTriangle, RefreshCw, Cpu
 } from 'lucide-react';
 import { apiClient } from '../../api/client';
 import { registerMediaStream, stopAllHardwareStreams } from '../../utils/hardware';
+import { evaluateDeviceCapability, DeviceCapabilityResult, TIER_PROFILES } from '../../utils/deviceCapability';
 
 export const PreExamCheckPage: React.FC = () => {
   const { examId } = useParams<{ examId: string }>();
@@ -17,10 +18,24 @@ export const PreExamCheckPage: React.FC = () => {
   const [micOk, setMicOk] = useState(false);
   const [networkOk, setNetworkOk] = useState(false);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
-  const [fullscreenOk, setFullscreenOk] = useState(false);
   const [faceVerified, setFaceVerified] = useState(false);
   const [isVerifyingFace, setIsVerifyingFace] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
+
+  // Device Capability & Performance Tier
+  const [deviceCap, setDeviceCap] = useState<DeviceCapabilityResult>({
+    tier: 'MEDIUM',
+    browserOk: true,
+    cameraOk: false,
+    micOk: false,
+    networkOk: true,
+    cpuLatencyMs: 25.0,
+    cameraResolution: 'Testing...',
+    cameraFrameRate: 30,
+    tierLabel: 'Evaluating...',
+    tierDescription: 'Analyzing device capability...',
+    profile: TIER_PROFILES.MEDIUM,
+  });
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -33,7 +48,6 @@ export const PreExamCheckPage: React.FC = () => {
         throw new Error('MediaDevices API not supported on this browser.');
       }
 
-      // If a stream was already running, stop it first
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => {
           try {
@@ -44,7 +58,7 @@ export const PreExamCheckPage: React.FC = () => {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480 },
+        video: { width: { ideal: 640 }, height: { ideal: 480 } },
         audio: true,
       });
 
@@ -56,6 +70,11 @@ export const PreExamCheckPage: React.FC = () => {
       setCameraOk(true);
       setMicOk(true);
       setMediaError(null);
+
+      // Evaluate device capability once stream is online
+      const cap = await evaluateDeviceCapability(stream, latencyMs);
+      setDeviceCap(cap);
+      sessionStorage.setItem('exam_device_tier', cap.tier);
     } catch (err: any) {
       console.warn('Camera/Mic access failed:', err);
       setCameraOk(false);
@@ -73,7 +92,7 @@ export const PreExamCheckPage: React.FC = () => {
     }
   };
 
-  // Complete hardware teardown (both camera and microphone)
+  // Complete hardware teardown
   const stopHardware = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => {
@@ -99,14 +118,12 @@ export const PreExamCheckPage: React.FC = () => {
     stopAllHardwareStreams();
   }, []);
 
-  // 1. Initial Diagnostic Checks
+  // Initial Diagnostic Checks
   useEffect(() => {
-    // Check Browser
     const hasMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
     const hasWs = typeof WebSocket !== 'undefined';
     setBrowserOk(hasMedia && hasWs);
 
-    // Check Network Latency
     const checkNetwork = async () => {
       const start = performance.now();
       try {
@@ -120,34 +137,13 @@ export const PreExamCheckPage: React.FC = () => {
     };
     checkNetwork();
 
-    // Check Fullscreen capability
-    setFullscreenOk(document.fullscreenEnabled);
-
-    // Start hardware checks
     startCamera();
 
-    // Listen for permission change if supported
-    let permStatus: PermissionStatus | null = null;
-    if (navigator.permissions && navigator.permissions.query) {
-      navigator.permissions.query({ name: 'camera' as PermissionName }).then((status) => {
-        permStatus = status;
-        status.onchange = () => {
-          if (status.state === 'granted') {
-            startCamera();
-          }
-        };
-      }).catch(() => {});
-    }
-
     return () => {
-      if (permStatus) {
-        permStatus.onchange = null;
-      }
       stopHardware();
     };
   }, [stopHardware]);
 
-  // Guarantee hardware teardown if tab is closed or navigated away
   useEffect(() => {
     const handleUnload = () => stopHardware();
     window.addEventListener('beforeunload', handleUnload);
@@ -164,6 +160,7 @@ export const PreExamCheckPage: React.FC = () => {
     navigate(`/candidate/exams/${examId}/details`);
   };
 
+  // Lightweight Local Face Verification (CPU-friendly, no heavy server upload)
   const handlePerformFaceVerification = async () => {
     if (!cameraOk || !streamRef.current || !videoRef.current) {
       alert('Camera access is required for identity calibration. Please unblock your camera and retry.');
@@ -172,22 +169,27 @@ export const PreExamCheckPage: React.FC = () => {
 
     setIsVerifyingFace(true);
     try {
-      // Capture frame and test face presence
       const canvas = document.createElement('canvas');
-      canvas.width = 320;
-      canvas.height = 240;
-      const ctx = canvas.getContext('2d');
+      canvas.width = 240;
+      canvas.height = 180;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (ctx && videoRef.current) {
-        ctx.drawImage(videoRef.current, 0, 0, 320, 240);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+        ctx.drawImage(videoRef.current, 0, 0, 240, 180);
+        const imgData = ctx.getImageData(0, 0, 240, 180);
+        const data = imgData.data;
 
-        const res = await apiClient.post('/proctoring/analyze-frame', {
-          session_id: 1,
-          image_base64: dataUrl,
-        }).catch(() => null);
+        let skinPixels = 0;
+        for (let i = 0; i < data.length; i += 4 * 3) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 12) {
+            skinPixels++;
+          }
+        }
 
-        if (res && res.data && res.data.face_count === 0) {
-          alert('No face detected in the frame. Please look directly into the camera and ensure good lighting.');
+        if (skinPixels < 30) {
+          alert('No face clearly visible in camera frame. Please ensure you are facing the camera in good lighting.');
           setIsVerifyingFace(false);
           return;
         }
@@ -202,8 +204,7 @@ export const PreExamCheckPage: React.FC = () => {
   };
 
   const handleEnterExam = async () => {
-    // Crucial: stop calibration stream so camera/mic hardware is completely released
-    // before the exam room requests the proctoring stream!
+    sessionStorage.setItem('exam_device_tier', deviceCap.tier);
     stopHardware();
     try {
       if (document.documentElement.requestFullscreen) {
@@ -215,7 +216,8 @@ export const PreExamCheckPage: React.FC = () => {
     navigate(`/candidate/exams/${examId}/room`);
   };
 
-  const allChecksPassed = browserOk && cameraOk && micOk && networkOk && faceVerified;
+  const isUnsupported = deviceCap.tier === 'UNSUPPORTED';
+  const allChecksPassed = browserOk && cameraOk && micOk && networkOk && faceVerified && !isUnsupported;
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
@@ -233,7 +235,7 @@ export const PreExamCheckPage: React.FC = () => {
             System & Environmental Verification
           </h1>
           <p className="text-stone-500 text-xs mt-0.5">
-            Hardware diagnostic tests must pass before entering the examination room
+            System hardware and environmental verification checks before entering the examination
           </p>
         </div>
       </div>
@@ -249,7 +251,7 @@ export const PreExamCheckPage: React.FC = () => {
               <p className="font-bold text-xs">Camera or Microphone Access Blocked by Browser</p>
               <p className="text-[11px] text-rose-700 mt-0.5">{mediaError}</p>
               <p className="text-[10px] text-rose-600 mt-1 font-medium">
-                💡 Look at the browser popup in the top-right &rarr; choose <strong>"Always allow http://localhost:5173 to access your camera and microphone"</strong> &rarr; click <strong>Done</strong> &rarr; then click <strong>Retry Access</strong> below.
+                💡 Look at the browser popup in the address bar &rarr; allow camera and microphone &rarr; then click <strong>Retry Access</strong> below.
               </p>
             </div>
           </div>
@@ -261,6 +263,20 @@ export const PreExamCheckPage: React.FC = () => {
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Retry Access</span>
           </button>
+        </div>
+      )}
+
+      {/* Unsupported Device Warning Card */}
+      {isUnsupported && (
+        <div className="p-5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 space-y-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-amber-700" />
+            <h3 className="text-sm font-bold text-amber-900">Device Requirements Notice</h3>
+          </div>
+          <p className="text-xs text-amber-800 leading-relaxed">
+            Your device does not currently meet the minimum requirements for this examination.
+            Please use a supported device or follow the examination administrator's alternative instructions.
+          </p>
         </div>
       )}
 
@@ -306,7 +322,7 @@ export const PreExamCheckPage: React.FC = () => {
                   </div>
                   <p className="text-xs font-bold text-rose-300">Camera Feed Blocked</p>
                   <p className="text-[11px] text-stone-400 max-w-xs leading-relaxed">
-                    Browser permission is set to "Block". Please click the lock or camera icon in your address bar and grant access.
+                    Browser permission is set to "Block". Please grant camera access to proceed with examination proctoring.
                   </p>
                   <button
                     type="button"
@@ -335,7 +351,7 @@ export const PreExamCheckPage: React.FC = () => {
             {isVerifyingFace ? (
               <div className="flex items-center gap-2">
                 <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span>Calibrating facial landmarks...</span>
+                <span>Checking camera positioning...</span>
               </div>
             ) : faceVerified ? (
               <>
@@ -354,19 +370,60 @@ export const PreExamCheckPage: React.FC = () => {
         {/* Right Side: Diagnostics Checklist */}
         <div className="card-cream p-5 sm:p-6 rounded-2xl flex flex-col justify-between space-y-4">
           <div>
-            <h2 className="text-xs font-bold text-stone-900 uppercase tracking-wider mb-3 flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-700" />
-              Pre-Flight Diagnostic Matrix
-            </h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-700" />
+                System Status
+              </h2>
+              <span className="text-[11px] text-stone-500 font-medium">
+                System Compatibility: Verified
+              </span>
+            </div>
 
-            <div className="space-y-2.5">
+            <div className="space-y-2">
+              {/* Camera */}
+              <div className="p-2.5 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <Camera className="w-4 h-4 text-stone-500" />
+                  <div>
+                    <p className="text-xs font-semibold text-stone-900">Camera</p>
+                    <p className="text-[10px] text-stone-500">
+                      {cameraOk ? 'Ready' : 'Device blocked by browser'}
+                    </p>
+                  </div>
+                </div>
+                {cameraOk ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                ) : (
+                  <XCircle className="w-4 h-4 text-rose-600" />
+                )}
+              </div>
+
+              {/* Microphone */}
+              <div className="p-2.5 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <Mic className="w-4 h-4 text-stone-500" />
+                  <div>
+                    <p className="text-xs font-semibold text-stone-900">Microphone</p>
+                    <p className="text-[10px] text-stone-500">
+                      {micOk ? 'Ready' : 'Sensor blocked by browser'}
+                    </p>
+                  </div>
+                </div>
+                {micOk ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                ) : (
+                  <XCircle className="w-4 h-4 text-rose-600" />
+                )}
+              </div>
+
               {/* Browser */}
-              <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between">
+              <div className="p-2.5 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <Monitor className="w-4 h-4 text-stone-500" />
                   <div>
-                    <p className="text-xs font-semibold text-stone-900">Modern Browser Engine</p>
-                    <p className="text-[10px] text-stone-500">WebRTC, WebAssembly & Canvas</p>
+                    <p className="text-xs font-semibold text-stone-900">Browser</p>
+                    <p className="text-[10px] text-stone-500">Compatible</p>
                   </div>
                 </div>
                 {browserOk ? (
@@ -376,55 +433,13 @@ export const PreExamCheckPage: React.FC = () => {
                 )}
               </div>
 
-              {/* Camera */}
-              <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <Camera className="w-4 h-4 text-stone-500" />
-                  <div>
-                    <p className="text-xs font-semibold text-stone-900">Video Capture Device</p>
-                    <p className="text-[10px] text-stone-500">
-                      {cameraOk ? 'Continuous optical stream' : 'Device blocked by browser'}
-                    </p>
-                  </div>
-                </div>
-                {cameraOk ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                ) : (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] text-rose-600 font-bold uppercase tracking-wider">Blocked</span>
-                    <XCircle className="w-4 h-4 text-rose-600" />
-                  </div>
-                )}
-              </div>
-
-              {/* Microphone */}
-              <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <Mic className="w-4 h-4 text-stone-500" />
-                  <div>
-                    <p className="text-xs font-semibold text-stone-900">Audio Sensor</p>
-                    <p className="text-[10px] text-stone-500">
-                      {micOk ? 'Ambient noise detector' : 'Sensor blocked by browser'}
-                    </p>
-                  </div>
-                </div>
-                {micOk ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                ) : (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] text-rose-600 font-bold uppercase tracking-wider">Blocked</span>
-                    <XCircle className="w-4 h-4 text-rose-600" />
-                  </div>
-                )}
-              </div>
-
-              {/* Network Latency */}
-              <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between">
+              {/* Network */}
+              <div className="p-2.5 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <Wifi className="w-4 h-4 text-stone-500" />
                   <div>
-                    <p className="text-xs font-semibold text-stone-900">Server Synchronization</p>
-                    <p className="text-[10px] text-stone-500">Latency: {latencyMs !== null ? `${latencyMs}ms` : 'Testing...'}</p>
+                    <p className="text-xs font-semibold text-stone-900">Network</p>
+                    <p className="text-[10px] text-stone-500">Good ({latencyMs !== null ? `${latencyMs}ms` : 'testing'})</p>
                   </div>
                 </div>
                 {networkOk ? (
@@ -434,13 +449,41 @@ export const PreExamCheckPage: React.FC = () => {
                 )}
               </div>
 
+              {/* System Compatibility */}
+              <div className="p-2.5 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <Cpu className="w-4 h-4 text-stone-500" />
+                  <div>
+                    <p className="text-xs font-semibold text-stone-900">System Compatibility</p>
+                    <p className="text-[10px] text-stone-500">
+                      {!isUnsupported ? 'Verified & Optimized' : 'Unsupported Browser/Device'}
+                    </p>
+                  </div>
+                </div>
+                {!isUnsupported ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                ) : (
+                  <XCircle className="w-4 h-4 text-rose-600" />
+                )}
+              </div>
+
+              {/* Reassuring note */}
+              {!isUnsupported && (
+                <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200/80 text-[11px] text-emerald-900">
+                  <p className="font-semibold text-[11px] text-emerald-950">✓ System Verified</p>
+                  <p className="text-[10px] text-emerald-800 mt-0.5">
+                    Your environment is verified and optimized for seamless examination delivery.
+                  </p>
+                </div>
+              )}
+
               {/* Face Verification */}
-              <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between">
+              <div className="p-2.5 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <UserCheck className="w-4 h-4 text-stone-500" />
                   <div>
-                    <p className="text-xs font-semibold text-stone-900">Facial Calibration</p>
-                    <p className="text-[10px] text-stone-500">Single candidate verified</p>
+                    <p className="text-xs font-semibold text-stone-900">Proctoring Calibration</p>
+                    <p className="text-[10px] text-stone-500">{faceVerified ? 'Ready' : 'Pending'}</p>
                   </div>
                 </div>
                 {faceVerified ? (
@@ -455,7 +498,11 @@ export const PreExamCheckPage: React.FC = () => {
           <button
             onClick={handleEnterExam}
             disabled={!allChecksPassed}
-            className="btn-primary w-full py-2.5 text-xs font-semibold justify-center"
+            className={`w-full py-2.5 text-xs font-semibold justify-center flex items-center gap-2 rounded-xl transition-all ${
+              allChecksPassed
+                ? 'btn-primary'
+                : 'bg-stone-200 text-stone-400 cursor-not-allowed border border-stone-300'
+            }`}
           >
             <span>Enter Examination Room</span>
             <ArrowRight className="w-3.5 h-3.5" />

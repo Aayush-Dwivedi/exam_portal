@@ -36,6 +36,20 @@ class CameraBlockedDetector:
                 "confidence": 0.90
             }
 
+        # Finger or hand covering lens (dark reddish frame with low variance)
+        if len(frame.shape) == 3 and frame.shape[2] == 3:
+            b_mean = float(np.mean(frame[:, :, 0]))
+            g_mean = float(np.mean(frame[:, :, 1]))
+            r_mean = float(np.mean(frame[:, :, 2]))
+            if (b_mean < 45 and g_mean < 45 and r_mean > 25 and std_variance < 12.0) or (std_variance < 6.5 and mean_brightness < 65):
+                return {
+                    "is_blocked": True,
+                    "reason": "LENS_COVERED_OCCLUSION",
+                    "mean_brightness": mean_brightness,
+                    "std_variance": std_variance,
+                    "confidence": 0.95
+                }
+
         return {
             "is_blocked": False,
             "mean_brightness": mean_brightness,

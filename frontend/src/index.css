@@ -50,7 +50,7 @@ body {
 }
 
 /* Form Input Preset */
-.input-cream {
+:where(.input-cream) {
   width: 100%;
   padding: 0.625rem 0.875rem;
   background-color: #FFFFFF;
@@ -60,13 +60,20 @@ body {
   font-size: 0.875rem;
   transition: all 0.15s ease-in-out;
 }
-.input-cream:focus {
+:where(.input-cream):focus {
   outline: none;
   border-color: #78716C;
   box-shadow: 0 0 0 3px rgba(120, 113, 108, 0.15);
 }
-.input-cream::placeholder {
+:where(.input-cream)::placeholder {
   color: #A8A29E;
+}
+
+/* Explicit left padding for inputs with icons so icons never overlap placeholder or text */
+.input-cream.pl-10,
+.input-cream.pl-9,
+.input-cream.has-icon {
+  padding-left: 2.625rem !important;
 }
 
 /* Buttons */

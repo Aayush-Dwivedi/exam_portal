@@ -27,7 +27,16 @@ export type ProctoringEventType =
   | 'PERSON_ENTERED_FRAME'
   | 'AUDIO_DISTURBANCE'
   | 'EYE_TRACKING_ANOMALY'
-  | 'FULLSCREEN_EXITED';
+  | 'FULLSCREEN_EXITED'
+  | 'CAMERA_DISCONNECTED'
+  | 'MICROPHONE_DISCONNECTED'
+  | 'NETWORK_INTERRUPTION'
+  | 'CV_PERFORMANCE_DEGRADED'
+  | 'BROWSER_TAB_HIDDEN';
+
+export type DeviceTier = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNSUPPORTED';
+export type CvStatus = 'ACTIVE' | 'DEGRADED' | 'PAUSED' | 'FAILED' | 'RECOVERING';
+export type NetworkStatus = 'ONLINE' | 'OFFLINE' | 'DEGRADED' | 'RECONNECTING';
 
 export type EventSeverity = 'LOW' | 'MEDIUM' | 'HIGH';
 export type ReviewStatus = 'UNREVIEWED' | 'REVIEWED' | 'DISMISSED' | 'CONFIRMED';
@@ -130,12 +139,16 @@ export interface ExamSessionData {
     answer_text?: string | null;
     is_marked_review: boolean;
   }>;
-  rules: {
+    rules: {
     negative_marking: boolean;
     allow_navigation: boolean;
     allow_mark_review: boolean;
     proctoring_enabled: boolean;
   };
+  device_tier?: DeviceTier;
+  cv_status?: CvStatus;
+  cv_status_reason?: string | null;
+  network_status?: NetworkStatus;
 }
 
 export interface Result {
@@ -203,6 +216,11 @@ export interface ProctoringReport {
   risk_score: number;
   risk_level: 'LOW' | 'MEDIUM' | 'HIGH';
   recording_url?: string | null;
+  started_at?: string | null;
+  device_tier?: DeviceTier;
+  cv_status?: CvStatus;
+  cv_status_reason?: string | null;
+  technical_events_count?: number;
   events: ProctoringEvent[];
 }
 

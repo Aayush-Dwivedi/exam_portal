@@ -65,6 +65,11 @@ class ProctoringEventType(str, enum.Enum):
     AUDIO_DISTURBANCE = "AUDIO_DISTURBANCE"
     EYE_TRACKING_ANOMALY = "EYE_TRACKING_ANOMALY"
     FULLSCREEN_EXITED = "FULLSCREEN_EXITED"
+    CAMERA_DISCONNECTED = "CAMERA_DISCONNECTED"
+    MICROPHONE_DISCONNECTED = "MICROPHONE_DISCONNECTED"
+    NETWORK_INTERRUPTION = "NETWORK_INTERRUPTION"
+    CV_PERFORMANCE_DEGRADED = "CV_PERFORMANCE_DEGRADED"
+    BROWSER_TAB_HIDDEN = "BROWSER_TAB_HIDDEN"
 
 class EventSeverity(str, enum.Enum):
     LOW = "LOW"
@@ -228,6 +233,10 @@ class ExamSession(Base):
     status = Column(SQLEnum(SessionStatus), default=SessionStatus.IN_PROGRESS, nullable=False, index=True)
     last_activity = Column(DateTime, default=utc_now, nullable=False)
     recording_url = Column(String(500), nullable=True) # URL or path to recorded proctored video
+    device_tier = Column(String(50), default="MEDIUM", nullable=True) # HIGH, MEDIUM, LOW, UNSUPPORTED
+    cv_status = Column(String(50), default="ACTIVE", nullable=True) # ACTIVE, DEGRADED, PAUSED, FAILED, RECOVERING
+    cv_status_reason = Column(String(255), nullable=True)
+    network_status = Column(String(50), default="GOOD", nullable=True) # GOOD, DEGRADED, OFFLINE
     
     # Store persistent deterministic shuffled order
     question_order = Column(JSON, nullable=True) # List of question IDs

@@ -32,6 +32,17 @@ class Settings(BaseSettings):
     PHONE_DETECTED_THRESHOLD_SECONDS: float = 1.0
     CAMERA_BLOCKED_THRESHOLD_SECONDS: float = 2.0
     
+    # Lightweight Performance Tiers & Sampling
+    CV_MIN_CONFIDENCE: float = 0.60
+    CV_FRAME_INTERVAL_HIGH_MS: int = 1800
+    CV_FRAME_INTERVAL_MEDIUM_MS: int = 2800
+    CV_FRAME_INTERVAL_LOW_MS: int = 4000
+    EVENT_COOLDOWN_SECONDS: float = 12.0
+    SERVER_ASSISTED_ENABLED: bool = True
+    RECORD_FULL_VIDEO: bool = False
+    MAX_FRAME_WIDTH: int = 320
+    MAX_FRAME_HEIGHT: int = 240
+    
     # Risk weights
     WEIGHT_PHONE_DETECTED: int = 45
     WEIGHT_MULTIPLE_FACES: int = 35

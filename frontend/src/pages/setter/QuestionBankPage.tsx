@@ -13,7 +13,6 @@ export const QuestionBankPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
-  const [diffFilter, setDiffFilter] = useState<string>('ALL');
 
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -89,7 +88,6 @@ export const QuestionBankPage: React.FC = () => {
       setLoading(true);
       let query = '/questions?';
       if (typeFilter !== 'ALL') query += `question_type=${typeFilter}&`;
-      if (diffFilter !== 'ALL') query += `difficulty=${diffFilter}&`;
       if (search.trim()) query += `search=${encodeURIComponent(search.trim())}&`;
 
       const res = await apiClient.get<Question[]>(query);
@@ -103,7 +101,7 @@ export const QuestionBankPage: React.FC = () => {
 
   useEffect(() => {
     fetchQuestions();
-  }, [typeFilter, diffFilter]);
+  }, [typeFilter]);
 
   const handleOpenCreate = () => {
     setEditingQuestion(null);
@@ -307,7 +305,7 @@ export const QuestionBankPage: React.FC = () => {
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && fetchQuestions()}
             placeholder="Search questions by text, subject, or topic..."
-            className="input-cream pl-9 py-2 text-xs"
+            className="input-cream pl-10 py-2 text-xs"
           />
         </div>
 
@@ -322,17 +320,6 @@ export const QuestionBankPage: React.FC = () => {
             <option value="MULTI_SELECT">Multi-Select</option>
             <option value="TRUE_FALSE">True / False</option>
             <option value="NUMERICAL">Numerical</option>
-          </select>
-
-          <select
-            value={diffFilter}
-            onChange={(e) => setDiffFilter(e.target.value)}
-            className="bg-white border border-stone-300 rounded-xl px-3 py-2 text-xs font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-stone-400"
-          >
-            <option value="ALL">All Difficulties</option>
-            <option value="EASY">Easy</option>
-            <option value="MEDIUM">Medium</option>
-            <option value="HARD">Hard</option>
           </select>
         </div>
       </div>
@@ -366,11 +353,6 @@ export const QuestionBankPage: React.FC = () => {
                   </span>
                   <Badge label={q.subject} variant="purple" size="sm" />
                   <Badge label={q.topic} variant="neutral" size="sm" />
-                  <Badge
-                    label={q.difficulty}
-                    variant={q.difficulty === 'EASY' ? 'success' : q.difficulty === 'MEDIUM' ? 'warning' : 'danger'}
-                    size="sm"
-                  />
                   <Badge label={q.question_type} variant="info" size="sm" />
                 </div>
 
@@ -477,21 +459,6 @@ export const QuestionBankPage: React.FC = () => {
                 <option value="MULTI_SELECT">Multi-Select</option>
                 <option value="TRUE_FALSE">True/False</option>
                 <option value="NUMERICAL">Numerical</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-semibold text-stone-700 uppercase tracking-wider mb-1">
-                Difficulty
-              </label>
-              <select
-                value={difficulty}
-                onChange={(e) => setDifficulty(e.target.value as DifficultyLevel)}
-                className="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-xl text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-400"
-              >
-                <option value="EASY">Easy</option>
-                <option value="MEDIUM">Medium</option>
-                <option value="HARD">Hard</option>
               </select>
             </div>
 

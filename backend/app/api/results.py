@@ -1,12 +1,14 @@
+import os
+import glob
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
-from sqlalchemy import desc
+from sqlalchemy import desc, delete
 from app.database.session import get_db
-from app.models import Result, ExamSession, Exam, User, UserRole, utc_now
+from app.models import Result, ExamSession, Exam, User, UserRole, utc_now, ProctoringEvent, Answer, AuditLog
 from app.schemas import ResultOut, PublishResultRequest, BulkPublishResultRequest
 from app.auth.deps import get_current_user, require_roles
 from app.services.risk import get_session_risk_summary
@@ -345,4 +347,58 @@ async def publish_all_results(
         "status": "success",
         "published_count": count,
         "message": f"Successfully approved and published {count} assessment results."
+    }
+
+@router.post("/purge-history")
+async def purge_exam_history(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.ADMIN))
+):
+    """
+    Administrative endpoint to purge all candidate examination sessions,
+    results, answers, proctoring events, and on-disk video recordings.
+    Exams, questions, and registered user accounts remain intact.
+    """
+    # 1. Delete all proctoring events
+    await db.execute(delete(ProctoringEvent))
+    # 2. Delete all answers
+    await db.execute(delete(Answer))
+    # 3. Delete all results
+    await db.execute(delete(Result))
+    # 4. Delete all exam sessions
+    await db.execute(delete(ExamSession))
+    # 5. Clean session-related audit logs
+    await db.execute(
+        delete(AuditLog).where(
+            AuditLog.action.in_([
+                'EXAM_STARTED', 'EXAM_SUBMITTED', 'RESULT_PUBLISHED', 
+                'RESULT_UNPUBLISHED', 'RESULTS_BULK_PUBLISHED', 'PROCTORING_EVENT'
+            ]) | AuditLog.resource_type.like('EXAM_SESSION%')
+        )
+    )
+    await db.commit()
+
+    # 6. Delete recorded video files from disk
+    rec_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../recordings'))
+    deleted_files = 0
+    if os.path.exists(rec_dir):
+        for f in glob.glob(os.path.join(rec_dir, '*.*')):
+            try:
+                os.remove(f)
+                deleted_files += 1
+            except Exception:
+                pass
+
+    await log_audit_event(
+        db=db,
+        action="EXAM_HISTORY_PURGED",
+        resource_type="EXAM_HISTORY",
+        user_id=current_user.id,
+        resource_id="ALL",
+        details={"deleted_recordings": deleted_files}
+    )
+
+    return {
+        "status": "success",
+        "message": "All previous exam sessions, answers, results, proctoring events, and recordings have been permanently cleared."
     }

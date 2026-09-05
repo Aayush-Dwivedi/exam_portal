@@ -35,29 +35,16 @@ async def seed_data():
             role=UserRole.ADMIN,
             status=UserStatus.ACTIVE
         )
-        setter1 = User(
-            name="Alex Turner (CS Lead)",
-            email="setter.alex@examportal.com",
-            password_hash=get_password_hash("setter123"),
-            role=UserRole.PAPER_SETTER,
+        candidate = User(
+            name="Aayush Raj",
+            email="techraj8334@gmail.com",
+            roll_number="CS2026-009",
+            password_hash=get_password_hash("candidate123"),
+            role=UserRole.CANDIDATE,
             status=UserStatus.ACTIVE
         )
-        setter2 = User(
-            name="Dr. Sarah Jenkins (Quant & Algorithms)",
-            email="setter.sarah@examportal.com",
-            password_hash=get_password_hash("setter123"),
-            role=UserRole.PAPER_SETTER,
-            status=UserStatus.ACTIVE
-        )
-        candidates = [
-            User(name="Rahul Sharma", email="rahul.sharma@example.com", roll_number="CS2026-001", password_hash=get_password_hash("candidate123"), role=UserRole.CANDIDATE, status=UserStatus.ACTIVE),
-            User(name="Priya Patel", email="priya.patel@example.com", roll_number="CS2026-002", password_hash=get_password_hash("candidate123"), role=UserRole.CANDIDATE, status=UserStatus.ACTIVE),
-            User(name="Amit Kumar", email="amit.kumar@example.com", roll_number="CS2026-003", password_hash=get_password_hash("candidate123"), role=UserRole.CANDIDATE, status=UserStatus.ACTIVE),
-            User(name="Sneha Reddy", email="sneha.reddy@example.com", roll_number="CS2026-004", password_hash=get_password_hash("candidate123"), role=UserRole.CANDIDATE, status=UserStatus.ACTIVE),
-            User(name="Vikram Singh", email="vikram.singh@example.com", roll_number="CS2026-005", password_hash=get_password_hash("candidate123"), role=UserRole.CANDIDATE, status=UserStatus.ACTIVE),
-        ]
 
-        db.add_all([admin, setter1, setter2] + candidates)
+        db.add_all([admin, candidate])
         await db.flush()
 
         # 2. QUESTIONS BANK (30+ questions)
@@ -295,7 +282,7 @@ async def seed_data():
                 marks=q_data["marks"],
                 negative_marks=q_data["neg"],
                 explanation=q_data["exp"],
-                created_by=q_data["setter"]
+                created_by=admin.id
             )
             db.add(q_obj)
             await db.flush()
@@ -321,7 +308,7 @@ async def seed_data():
                 marks=2.0,
                 negative_marks=0.5,
                 explanation=f"The correct answer is {correct_ans}.",
-                created_by=setter1.id if "Web" in subj or "Database" in subj else setter2.id
+                created_by=admin.id
             )
             db.add(q_obj)
             await db.flush()
@@ -338,239 +325,47 @@ async def seed_data():
         await db.flush()
         print(f"[OK] Created {len(created_questions)} questions in question bank.")
 
-        # 3. EXAMS
+        # 3. PRACTICE MOCK EXAM
         now = utc_now()
-
-        # Exam 1: Full Stack Web Engineering
-        exam1 = Exam(
-            title="Full Stack Web Engineering & Architecture Assessment",
-            description="Comprehensive assessment covering modern React architecture, backend APIs, HTTP protocols, and PostgreSQL relational design.",
-            instructions="1. Ensure your webcam is enabled and unobstructed at all times.\n2. Do not switch browser tabs or exit fullscreen mode.\n3. Each question carries marks with negative marking for incorrect answers.",
-            duration_minutes=45,
+        mock_exam = Exam(
+            title="Practice Mock Exam",
+            description="Comprehensive mock examination for candidate practice, environmental calibration, and system diagnostics. Can be attempted multiple times.",
+            instructions="1. Ensure your webcam and microphone are enabled.\n2. Stay centered within the camera frame during the examination.\n3. This practice exam can be retaken at any time to verify system readiness.",
+            duration_minutes=15,
             start_time=now - timedelta(days=1),
-            end_time=now + timedelta(days=7),
+            end_time=now + timedelta(days=365),
             status=ExamStatus.PUBLISHED,
-            negative_marking=True,
+            negative_marking=False,
             allow_navigation=True,
             allow_mark_review=True,
             shuffle_questions=True,
             shuffle_options=True,
             proctoring_enabled=True,
-            created_by=setter1.id,
+            allow_reattempts=True,
+            created_by=admin.id,
             approved_by=admin.id
         )
-        db.add(exam1)
+        db.add(mock_exam)
         await db.flush()
 
-        # Sections for Exam 1
-        sec1 = Section(exam_id=exam1.id, title="Frontend & React Architecture", sequence=0)
-        sec2 = Section(exam_id=exam1.id, title="Backend & Relational Databases", sequence=1)
-        db.add_all([sec1, sec2])
+        sec_mock = Section(exam_id=mock_exam.id, title="Practice Diagnostics & General Aptitude", sequence=0)
+        db.add(sec_mock)
         await db.flush()
 
-        # Assign first 10 questions to Exam 1
         for idx, q in enumerate(created_questions[:10]):
             eq = ExamQuestion(
-                exam_id=exam1.id,
+                exam_id=mock_exam.id,
                 question_id=q.id,
-                section_id=sec1.id if idx < 5 else sec2.id,
+                section_id=sec_mock.id,
                 sequence=idx
             )
             db.add(eq)
 
-        # Exam 2: Data Structures & Algorithms
-        exam2 = Exam(
-            title="Data Structures, Algorithms & Problem Solving",
-            description="Standard core CS assessment covering trees, graphs, sorting complexity, and dynamic programming.",
-            instructions="Solve the algorithmic problems carefully. Timer starts once you begin the examination.",
-            duration_minutes=30,
-            start_time=now - timedelta(hours=6),
-            end_time=now + timedelta(days=5),
-            status=ExamStatus.PUBLISHED,
-            negative_marking=True,
-            allow_navigation=True,
-            allow_mark_review=True,
-            proctoring_enabled=True,
-            created_by=setter2.id,
-            approved_by=admin.id
-        )
-        db.add(exam2)
-        await db.flush()
-
-        sec_dsa = Section(exam_id=exam2.id, title="Algorithms & Complexity", sequence=0)
-        db.add(sec_dsa)
-        await db.flush()
-
-        for idx, q in enumerate(created_questions[10:20]):
-            eq = ExamQuestion(
-                exam_id=exam2.id,
-                question_id=q.id,
-                section_id=sec_dsa.id,
-                sequence=idx
-            )
-            db.add(eq)
-
-        # Exam 3: Quantitative Aptitude (Under Review Draft)
-        exam3 = Exam(
-            title="Quantitative Aptitude & Logical Reasoning",
-            description="Speed, distance, time, work, series, and logical reasoning aptitude test.",
-            instructions="Standard aptitude test guidelines apply.",
-            duration_minutes=30,
-            status=ExamStatus.UNDER_REVIEW,
-            created_by=setter2.id
-        )
-        db.add(exam3)
-        await db.flush()
-
-        sec_quant = Section(exam_id=exam3.id, title="Numerical Aptitude", sequence=0)
-        db.add(sec_quant)
-        await db.flush()
-
-        for idx, q in enumerate(created_questions[20:28]):
-            eq = ExamQuestion(
-                exam_id=exam3.id,
-                question_id=q.id,
-                section_id=sec_quant.id,
-                sequence=idx
-            )
-            db.add(eq)
-
-        # 4. ENROLL CANDIDATES
-        for c in candidates:
-            db.add(CandidateEnrollment(candidate_id=c.id, exam_id=exam1.id, status="ENROLLED"))
-            db.add(CandidateEnrollment(candidate_id=c.id, exam_id=exam2.id, status="ENROLLED"))
-
-        await db.flush()
-
-        # 5. SAMPLE COMPLETED SESSIONS & PROCTORING EVENTS
-        # Rahul's completed session with Low risk
-        sess1 = ExamSession(
-            exam_id=exam1.id,
-            candidate_id=candidates[0].id, # Rahul
-            started_at=now - timedelta(hours=3),
-            submitted_at=now - timedelta(hours=2, minutes=20),
-            expires_at=now - timedelta(hours=2, minutes=15),
-            status=SessionStatus.SUBMITTED,
-            last_activity=now - timedelta(hours=2, minutes=20)
-        )
-        db.add(sess1)
-        await db.flush()
-
-        res1 = Result(
-            session_id=sess1.id,
-            candidate_id=candidates[0].id,
-            exam_id=exam1.id,
-            total_questions=10,
-            attempted=10,
-            correct=9,
-            incorrect=1,
-            unanswered=0,
-            score=17.5,
-            max_score=19.0,
-            percentage=92.1,
-            section_scores={"Frontend & React Architecture": {"score": 8.5, "max_score": 9.0}, "Backend & Relational Databases": {"score": 9.0, "max_score": 10.0}}
-        )
-        db.add(res1)
-
-        # Priya's completed session with Medium risk (Looking away events)
-        sess2 = ExamSession(
-            exam_id=exam1.id,
-            candidate_id=candidates[1].id, # Priya
-            started_at=now - timedelta(hours=4),
-            submitted_at=now - timedelta(hours=3, minutes=18),
-            expires_at=now - timedelta(hours=3, minutes=15),
-            status=SessionStatus.SUBMITTED,
-            last_activity=now - timedelta(hours=3, minutes=18)
-        )
-        db.add(sess2)
-        await db.flush()
-
-        res2 = Result(
-            session_id=sess2.id,
-            candidate_id=candidates[1].id,
-            exam_id=exam1.id,
-            total_questions=10,
-            attempted=9,
-            correct=7,
-            incorrect=2,
-            unanswered=1,
-            score=13.0,
-            max_score=19.0,
-            percentage=68.4,
-            section_scores={"Frontend & React Architecture": {"score": 6.5, "max_score": 9.0}, "Backend & Relational Databases": {"score": 6.5, "max_score": 10.0}}
-        )
-        db.add(res2)
-
-        # Proctoring events for Priya
-        db.add(ProctoringEvent(
-            session_id=sess2.id,
-            event_type=ProctoringEventType.LOOKING_AWAY,
-            timestamp=sess2.started_at + timedelta(minutes=12),
-            duration=3.2,
-            confidence=0.88,
-            severity=EventSeverity.LOW,
-            metadata_info={"pose": "RIGHT", "deviation": 0.28}
-        ))
-        db.add(ProctoringEvent(
-            session_id=sess2.id,
-            event_type=ProctoringEventType.LOOKING_AWAY,
-            timestamp=sess2.started_at + timedelta(minutes=24),
-            duration=4.5,
-            confidence=0.91,
-            severity=EventSeverity.MEDIUM,
-            metadata_info={"pose": "LEFT", "deviation": 0.38}
-        ))
-
-        # Amit's session with High risk (Phone detected)
-        sess3 = ExamSession(
-            exam_id=exam1.id,
-            candidate_id=candidates[2].id, # Amit
-            started_at=now - timedelta(hours=2),
-            submitted_at=now - timedelta(hours=1, minutes=15),
-            expires_at=now - timedelta(hours=1, minutes=15),
-            status=SessionStatus.SUBMITTED,
-            last_activity=now - timedelta(hours=1, minutes=15)
-        )
-        db.add(sess3)
-        await db.flush()
-
-        res3 = Result(
-            session_id=sess3.id,
-            candidate_id=candidates[2].id,
-            exam_id=exam1.id,
-            total_questions=10,
-            attempted=8,
-            correct=5,
-            incorrect=3,
-            unanswered=2,
-            score=9.25,
-            max_score=19.0,
-            percentage=48.7,
-            section_scores={"Frontend & React Architecture": {"score": 4.5, "max_score": 9.0}, "Backend & Relational Databases": {"score": 4.75, "max_score": 10.0}}
-        )
-        db.add(res3)
-
-        db.add(ProctoringEvent(
-            session_id=sess3.id,
-            event_type=ProctoringEventType.PHONE_DETECTED,
-            timestamp=sess3.started_at + timedelta(minutes=18),
-            duration=2.4,
-            confidence=0.92,
-            severity=EventSeverity.HIGH,
-            metadata_info={"device": "cell_phone", "confidence": 0.92}
-        ))
-        db.add(ProctoringEvent(
-            session_id=sess3.id,
-            event_type=ProctoringEventType.MULTIPLE_FACES,
-            timestamp=sess3.started_at + timedelta(minutes=26),
-            duration=2.8,
-            confidence=0.94,
-            severity=EventSeverity.HIGH,
-            metadata_info={"face_count": 2}
-        ))
+        # 4. ENROLL CANDIDATE
+        db.add(CandidateEnrollment(candidate_id=candidate.id, exam_id=mock_exam.id, status="ENROLLED"))
 
         await db.commit()
-        print("[SUCCESS] Database successfully seeded with Admins, Paper Setters, Candidates, Exams, Questions, and Sample Proctoring History!")
+        print("[SUCCESS] Database successfully initialized with Admin, Candidate, and Practice Mock Exam!")
 
 if __name__ == "__main__":
     asyncio.run(seed_data())

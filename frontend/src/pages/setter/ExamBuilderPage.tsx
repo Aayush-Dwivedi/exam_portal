@@ -5,7 +5,7 @@ import {
   Layers, Settings, Calendar, Eye, Send, CheckCircle2, AlertCircle, Trash2
 } from 'lucide-react';
 import { apiClient } from '../../api/client';
-import { Question, Section, DifficultyLevel } from '../../types';
+import { Question, Section } from '../../types';
 import { Badge } from '../../components/common/Badge';
 
 export const ExamBuilderPage: React.FC = () => {
@@ -336,7 +336,6 @@ export const ExamBuilderPage: React.FC = () => {
                           <p className="text-xs font-semibold text-stone-900">{q.question_text}</p>
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-[11px] text-stone-500 font-medium">{q.subject} · {q.topic}</span>
-                            <Badge label={q.difficulty} size="sm" variant={q.difficulty === 'EASY' ? 'success' : q.difficulty === 'MEDIUM' ? 'warning' : 'danger'} />
                           </div>
                         </div>
                       </div>

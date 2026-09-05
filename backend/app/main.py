@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.core.config import settings
 from app.core.logging import setup_logging, logger
-from app.database.session import engine, get_db
+from app.database.session import engine, get_db, upgrade_database_schema
 from app.database.base import Base
 import app.models # Ensures all models are registered with Base
 
@@ -26,6 +26,14 @@ from app.api.analytics import router as analytics_router
 from app.api.audit import router as audit_router
 from app.websocket.manager import ws_manager
 
+from datetime import datetime, timezone
+import fastapi.encoders
+
+# Ensure all naive UTC datetimes serialized by FastAPI jsonable_encoder include 'Z'
+fastapi.encoders.ENCODERS_BY_TYPE[datetime] = lambda dt: (
+    dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+).isoformat().replace("+00:00", "Z")
+
 setup_logging()
 
 @asynccontextmanager
@@ -34,7 +42,26 @@ async def lifespan(app: FastAPI):
     # Initialize database tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await upgrade_database_schema()
     logger.info("Database schemas verified.")
+
+    # Auto-seed if database has no records (e.g. freshly provisioned cloud PostgreSQL)
+    try:
+        from app.database.session import AsyncSessionLocal
+        from sqlalchemy.future import select
+        from app.models import User
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(select(User).limit(1))
+            if not res.scalars().first():
+                logger.info("Empty database detected. Initializing admin account and mock exams...")
+                from seed import seed_data
+                await seed_data()
+                from create_dummy_exam import create_dummy_exam
+                await create_dummy_exam()
+                logger.info("Initial database seeding completed successfully.")
+    except Exception as ex:
+        logger.warning(f"Database auto-seed check skipped or encountered note: {ex}")
+
     yield
     logger.info("Shutting down Exam Portal Backend Services...")
 

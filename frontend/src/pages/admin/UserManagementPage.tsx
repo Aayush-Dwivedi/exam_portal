@@ -7,6 +7,7 @@ import { apiClient } from '../../api/client';
 import { User, UserRole, UserStatus } from '../../types';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
+import { formatISTDate } from '../../utils/date';
 
 export const UserManagementPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -171,7 +172,7 @@ export const UserManagementPage: React.FC = () => {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search users by name, roll number, or email..."
-            className="input-cream pl-9 py-2 text-xs"
+            className="input-cream pl-10 py-2 text-xs"
           />
         </form>
 
@@ -276,7 +277,7 @@ export const UserManagementPage: React.FC = () => {
                       />
                     </td>
                     <td className="py-3 px-4 text-stone-600">
-                      {new Date(u.created_at).toLocaleDateString()}
+                      {formatISTDate(u.created_at)}
                     </td>
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
@@ -335,7 +336,7 @@ export const UserManagementPage: React.FC = () => {
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              placeholder="e.g. Rahul Sharma"
+              placeholder="e.g. Candidate Name"
               className="input-cream"
             />
           </div>

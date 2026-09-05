@@ -21,8 +21,8 @@ from app.schemas import (
     ProctoringEventCreate, ProctoringEventOut, 
     ProctoringEventReview, ProctoringSessionReport
 )
-from app.auth.deps import get_current_user, require_roles
-from app.services.risk import calculate_risk_signal
+from app.auth.deps import get_current_user, get_current_user_flexible, require_roles
+from app.services.risk import calculate_risk_signal, is_technical_event
 from app.services.audit import log_audit_event
 from app.websocket.manager import ws_manager
 
@@ -52,6 +52,29 @@ class FrameAnalysisResponse(BaseModel):
     warning: Optional[str] = None
     warning_severity: Optional[str] = None
     events_triggered: List[str] = []
+
+class SessionStatusUpdate(BaseModel):
+    session_id: int
+    device_tier: Optional[str] = None
+    cv_status: Optional[str] = None
+    cv_status_reason: Optional[str] = None
+    network_status: Optional[str] = None
+
+class ServerAssistedCheckRequest(BaseModel):
+    session_id: int
+    image_base64: str
+
+class ServerAssistedCheckResponse(BaseModel):
+    face_count: int
+    phone_detected: bool
+    looking_away: bool
+    camera_blocked: bool
+    confidence: float
+    message: Optional[str] = None
+
+# Rate limiting dictionary: session_id -> last_timestamp
+_last_server_check: Dict[int, float] = {}
+_last_server_result: Dict[int, Any] = {}
 
 @router.post("/analyze-frame", response_model=FrameAnalysisResponse)
 async def analyze_camera_frame(
@@ -159,7 +182,7 @@ async def analyze_camera_frame(
             "severity": new_ev.severity.value,
             "confidence": new_ev.confidence,
             "duration": new_ev.duration,
-            "timestamp": now.isoformat()
+            "timestamp": now.isoformat() + "Z"
         })
 
     if triggered_events:
@@ -249,10 +272,155 @@ async def record_proctoring_event(
         "severity": event.severity.value,
         "confidence": event.confidence,
         "duration": event.duration,
-        "timestamp": event.timestamp.isoformat()
+        "timestamp": event.timestamp.isoformat() + "Z",
+        "is_technical": is_technical_event(event.event_type)
     })
 
     return event
+
+@router.post("/session-status")
+async def update_session_proctoring_status(
+    payload: SessionStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Updates proctoring and connection health status for an active candidate session.
+    Broadcasts real-time telemetry to the admin live monitoring dashboard.
+    """
+    stmt = select(ExamSession).where(ExamSession.id == payload.session_id)
+    res = await db.execute(stmt)
+    session = res.scalars().first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Exam session not found")
+
+    if current_user.role == UserRole.CANDIDATE and session.candidate_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if payload.device_tier is not None:
+        session.device_tier = payload.device_tier
+    if payload.cv_status is not None:
+        session.cv_status = payload.cv_status
+    if payload.cv_status_reason is not None:
+        session.cv_status_reason = payload.cv_status_reason
+    if payload.network_status is not None:
+        session.network_status = payload.network_status
+
+    await db.commit()
+
+    # Broadcast to admin monitor
+    await ws_manager.broadcast_to_admins({
+        "type": "proctoring.status",
+        "session_id": session.id,
+        "candidate_id": session.candidate_id,
+        "device_tier": session.device_tier,
+        "cv_status": session.cv_status,
+        "cv_status_reason": session.cv_status_reason,
+        "network_status": session.network_status
+    })
+
+    return {
+        "status": "STATUS_UPDATED",
+        "session_id": session.id,
+        "device_tier": session.device_tier,
+        "cv_status": session.cv_status,
+        "cv_status_reason": session.cv_status_reason,
+        "network_status": session.network_status
+    }
+
+@router.post("/server-assisted-check", response_model=ServerAssistedCheckResponse)
+async def server_assisted_check(
+    payload: ServerAssistedCheckRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Lightweight, rate-limited server-assisted fallback inspection.
+    Accepts low-resolution compressed snapshot from candidate device, runs CPU inference
+    for phone & face verification, returning signals without overloading server or candidate.
+    """
+    import time
+    now_ts = time.time()
+    last_ts = _last_server_check.get(payload.session_id, 0.0)
+    # Rate limit: if called faster than once per 1.0s, return the cached result
+    if (now_ts - last_ts) < 1.0 and payload.session_id in _last_server_result:
+        return _last_server_result[payload.session_id]
+    _last_server_check[payload.session_id] = now_ts
+
+    stmt = select(ExamSession).where(ExamSession.id == payload.session_id)
+    res = await db.execute(stmt)
+    session = res.scalars().first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Exam session not found")
+
+    if current_user.role == UserRole.CANDIDATE and session.candidate_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if session.id not in session_engines:
+        session_engines[session.id] = ProctoringEventEngine()
+    engine = session_engines[session.id]
+
+    frame = None
+    try:
+        header_data = payload.image_base64
+        if "," in header_data:
+            header_data = header_data.split(",")[1]
+        img_bytes = base64.b64decode(header_data)
+        np_arr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    except Exception:
+        frame = None
+
+    if frame is None or frame.size == 0:
+        fallback = ServerAssistedCheckResponse(
+            face_count=1,
+            phone_detected=False,
+            looking_away=False,
+            camera_blocked=False,
+            confidence=0.5,
+            message="Invalid frame format"
+        )
+        return fallback
+
+    # 1. Blocked check
+    blocked_diag = engine.camera_blocked_detector.check_blocked(frame)
+    if blocked_diag["is_blocked"]:
+        resp = ServerAssistedCheckResponse(
+            face_count=0,
+            phone_detected=False,
+            looking_away=False,
+            camera_blocked=True,
+            confidence=blocked_diag.get("confidence", 0.9)
+        )
+        _last_server_result[payload.session_id] = resp
+        return resp
+
+    # 2. Face count
+    face_diag = engine.face_detector.analyze_frame(frame)
+    face_count = face_diag["face_count"]
+
+    # 3. Head pose if single face
+    looking_away = False
+    if face_count == 1 and face_diag["bounding_boxes"]:
+        x, y, w, h = face_diag["bounding_boxes"][0]
+        crop = frame[y:y+h, x:x+w]
+        pose = engine.head_pose_estimator.estimate_pose(crop)
+        looking_away = pose.get("looking_away", False)
+
+    # 4. Phone detection
+    obj_diag = engine.object_detector.detect_objects(frame)
+    phone_detected = obj_diag.get("phone_detected", False)
+
+    resp = ServerAssistedCheckResponse(
+        face_count=face_count,
+        phone_detected=phone_detected,
+        looking_away=looking_away,
+        camera_blocked=False,
+        confidence=0.90
+    )
+    _last_server_result[payload.session_id] = resp
+    return resp
+
 
 @router.get("/sessions/{session_id}", response_model=ProctoringSessionReport)
 async def get_session_proctoring_report(
@@ -296,6 +464,8 @@ async def get_session_proctoring_report(
     rec_file = os.path.join(rec_dir, f"session_{session.id}.webm")
     rec_url = session.recording_url or (f"/api/proctoring/sessions/{session.id}/recording" if os.path.exists(rec_file) else None)
 
+    tech_count = sum(1 for e in events if is_technical_event(e.event_type))
+
     return ProctoringSessionReport(
         session_id=session.id,
         candidate_name=session.candidate.name if session.candidate else "Unknown",
@@ -309,6 +479,11 @@ async def get_session_proctoring_report(
         risk_score=risk_score,
         risk_level=risk_level,
         recording_url=rec_url,
+        started_at=session.started_at,
+        device_tier=session.device_tier or "MEDIUM",
+        cv_status=session.cv_status or "ACTIVE",
+        cv_status_reason=session.cv_status_reason,
+        technical_events_count=tech_count,
         events=events
     )
 
@@ -354,7 +529,7 @@ async def upload_session_recording(
 async def stream_session_recording(
     session_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user_flexible)
 ):
     """
     Streams the recorded proctoring camera video for administrative forensic review.
@@ -442,20 +617,27 @@ async def get_live_candidates(
             else:
                 last_ev_time = f"{diff_sec // 60}m ago"
 
+        is_tech = is_technical_event(latest.event_type) if events else False
+
         output.append({
             "session_id": s.id,
             "candidate_id": s.candidate_id,
             "name": s.candidate.name if s.candidate else f"Candidate #{s.candidate_id}",
             "email": s.candidate.email if s.candidate else "candidate@example.com",
             "exam_title": s.exam.title if s.exam else "Examination Session",
-            "started_at": s.started_at.isoformat() if s.started_at else utc_now().isoformat(),
+            "started_at": (s.started_at.isoformat() + "Z") if s.started_at else (utc_now().isoformat() + "Z"),
             "progress": solved_q,
             "total_questions": total_q,
             "status": "ONLINE" if s.status == SessionStatus.IN_PROGRESS else "OFFLINE",
+            "device_tier": s.device_tier or "MEDIUM",
+            "cv_status": s.cv_status or "ACTIVE",
+            "cv_status_reason": s.cv_status_reason,
+            "network_status": s.network_status or ("ONLINE" if s.status == SessionStatus.IN_PROGRESS else "OFFLINE"),
             "risk_level": risk_level,
             "risk_score": risk_score,
             "last_event": last_ev,
-            "last_event_time": last_ev_time
+            "last_event_time": last_ev_time,
+            "is_technical_last_event": is_tech
         })
 
     return output

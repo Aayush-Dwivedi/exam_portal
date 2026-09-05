@@ -107,9 +107,9 @@ export const ExamDetailsPage: React.FC = () => {
           <div className="flex items-start gap-2.5">
             <Video className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
             <div className="text-xs text-amber-900 space-y-1">
-              <strong className="font-semibold block">Continuous Computer Vision Monitoring Notice:</strong>
+              <strong className="font-semibold block">Automated Exam Proctoring Notice:</strong>
               <p className="text-[11px] leading-relaxed text-amber-800">
-                This examination employs automated computer vision to detect observable environmental events (e.g. absence from frame, looking away for extended durations, presence of mobile devices). All events are reviewed by administrators before final validation.
+                This examination uses automated proctoring to ensure exam integrity (e.g., verifying candidate presence and screen focus). Any flagged anomalies are logged for administrative review.
               </p>
             </div>
           </div>
