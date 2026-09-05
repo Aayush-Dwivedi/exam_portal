@@ -1,0 +1,8 @@
+{
+  "name": "nested-frontend-shim",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.js"
+  }
+}
