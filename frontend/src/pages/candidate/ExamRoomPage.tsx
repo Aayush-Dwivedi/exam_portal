@@ -447,6 +447,7 @@ export const ExamRoomPage: React.FC = () => {
   const handleAutoSubmit = useCallback(async () => {
     if (!sessionData) return;
     try {
+      submittingRef.current = true;
       setSubmitting(true);
       if (monitorRef.current) {
         try {
@@ -455,17 +456,18 @@ export const ExamRoomPage: React.FC = () => {
           console.warn('Auto-submit recording upload failed', e);
         }
       }
-      await exitFullscreenSafe();
-      stopHardware();
       await apiClient.post(`/exam-sessions/${sessionData.session_id}/submit`);
-    } catch {
-      // ignore
-    } finally {
       await exitFullscreenSafe();
       stopHardware();
-      navigate(`/candidate/dashboard`);
+      navigate('/candidate/dashboard');
+    } catch (err) {
+      console.error('Failed to auto-submit', err);
+    } finally {
+      setSubmitting(false);
+      await exitFullscreenSafe();
+      stopHardware();
     }
-  }, [sessionData, navigate, stopHardware]);
+  }, [sessionData, stopHardware, navigate]);
 
   const autoSubmitRef = useRef(handleAutoSubmit);
   useEffect(() => {
@@ -693,6 +695,7 @@ export const ExamRoomPage: React.FC = () => {
   const handleConfirmSubmit = async () => {
     if (!sessionData) return;
     try {
+      submittingRef.current = true;
       setSubmitting(true);
       if (monitorRef.current) {
         try {
@@ -701,19 +704,19 @@ export const ExamRoomPage: React.FC = () => {
           console.warn('Recording upload failed', e);
         }
       }
-      // Guarantee immediate full-screen exit and hardware shutdown (both camera + mic)
-      await exitFullscreenSafe();
-      stopHardware();
 
       await apiClient.post<{ score: number }>(`/exam-sessions/${sessionData.session_id}/submit`);
+      
+      // Successfully submitted - clean up full-screen and hardware
+      await exitFullscreenSafe();
+      stopHardware();
       setIsSubmitModalOpen(false);
       navigate(`/candidate/dashboard`);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to submit examination.');
+      submittingRef.current = false;
+      alert(err.response?.data?.detail || 'Failed to submit examination. Please retry.');
     } finally {
       setSubmitting(false);
-      await exitFullscreenSafe();
-      stopHardware();
     }
   };
 

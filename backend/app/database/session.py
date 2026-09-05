@@ -16,14 +16,31 @@ if "sslmode=" in raw_db_url:
 
 # Engine configuration based on database dialect
 connect_args = {}
+engine_kwargs = {
+    "echo": False,
+    "future": True,
+}
+
 if raw_db_url.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
+else:
+    # Cloud PostgreSQL connection resilience (prevents 5s timeout on Render/Cloud DBs)
+    engine_kwargs.update({
+        "pool_pre_ping": True,
+        "pool_recycle": 300,
+        "pool_size": 10,
+        "max_overflow": 5,
+        "pool_timeout": 15,
+    })
+    connect_args = {
+        "command_timeout": 30,
+        "server_settings": {"application_name": "exam_portal"}
+    }
 
 engine = create_async_engine(
     raw_db_url,
-    echo=False,
-    future=True,
     connect_args=connect_args,
+    **engine_kwargs
 )
 
 AsyncSessionLocal = async_sessionmaker(
