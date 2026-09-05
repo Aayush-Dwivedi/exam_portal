@@ -134,14 +134,21 @@ async def create_demo_candidate(
     )
     published_exams = (await db.execute(exams_query)).scalars().all()
 
-    # If no published exams exist yet, ensure the practice mock exam is created
+    # If no published exams exist yet, ensure initial data & practice mock exam are created
     if not published_exams:
         try:
-            from create_dummy_exam import create_dummy_exam
-            await create_dummy_exam()
+            from seed import seed_data
+            await seed_data()
             published_exams = (await db.execute(exams_query)).scalars().all()
         except Exception:
             pass
+        if not published_exams:
+            try:
+                from create_dummy_exam import create_dummy_exam
+                await create_dummy_exam()
+                published_exams = (await db.execute(exams_query)).scalars().all()
+            except Exception:
+                pass
 
     enrolled_count = 0
     for ex in published_exams:

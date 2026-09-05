@@ -35,6 +35,20 @@ async def seed_data():
             role=UserRole.ADMIN,
             status=UserStatus.ACTIVE
         )
+        setter1 = User(
+            name="Dr. Aris Thorne",
+            email="setter@examportal.com",
+            password_hash=get_password_hash("setter123"),
+            role=UserRole.PAPER_SETTER,
+            status=UserStatus.ACTIVE
+        )
+        setter2 = User(
+            name="Prof. Sarah Jenkins",
+            email="setter2@examportal.com",
+            password_hash=get_password_hash("setter123"),
+            role=UserRole.PAPER_SETTER,
+            status=UserStatus.ACTIVE
+        )
         candidate = User(
             name="Aayush Raj",
             email="techraj8334@gmail.com",
@@ -44,7 +58,7 @@ async def seed_data():
             status=UserStatus.ACTIVE
         )
 
-        db.add_all([admin, candidate])
+        db.add_all([admin, setter1, setter2, candidate])
         await db.flush()
 
         # 2. QUESTIONS BANK (30+ questions)
