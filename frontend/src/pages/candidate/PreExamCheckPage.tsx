@@ -37,12 +37,26 @@ export const PreExamCheckPage: React.FC = () => {
     profile: TIER_PROFILES.MEDIUM,
   });
 
+  const [verificationFeedback, setVerificationFeedback] = useState<string | null>(null);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Callback ref to reliably attach stream whenever the video element mounts or re-renders
+  const attachVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    videoRef.current = node;
+    if (node && streamRef.current) {
+      if (node.srcObject !== streamRef.current) {
+        node.srcObject = streamRef.current;
+      }
+      node.play().catch((e) => console.warn('Video play catch:', e));
+    }
+  }, []);
 
   // Initialize Camera & Microphone Stream
   const startCamera = async () => {
     setMediaError(null);
+    setVerificationFeedback(null);
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('MediaDevices API not supported on this browser.');
@@ -57,18 +71,31 @@ export const PreExamCheckPage: React.FC = () => {
         });
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: true,
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: true,
+        });
+        setMicOk(true);
+      } catch (audioErr) {
+        console.warn('Combined audio+video failed, attempting video only:', audioErr);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: false,
+        });
+        setMicOk(false);
+      }
 
       registerMediaStream(stream);
       streamRef.current = stream;
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
       }
+
       setCameraOk(true);
-      setMicOk(true);
       setMediaError(null);
 
       // Evaluate device capability once stream is online
@@ -118,6 +145,16 @@ export const PreExamCheckPage: React.FC = () => {
     stopAllHardwareStreams();
   }, []);
 
+  // Ensure video element plays when cameraOk state flips
+  useEffect(() => {
+    if (cameraOk && videoRef.current && streamRef.current) {
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+      }
+      videoRef.current.play().catch(() => {});
+    }
+  }, [cameraOk]);
+
   // Initial Diagnostic Checks
   useEffect(() => {
     const hasMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -163,41 +200,86 @@ export const PreExamCheckPage: React.FC = () => {
   // Lightweight Local Face Verification (CPU-friendly, no heavy server upload)
   const handlePerformFaceVerification = async () => {
     if (!cameraOk || !streamRef.current || !videoRef.current) {
-      alert('Camera access is required for identity calibration. Please unblock your camera and retry.');
+      setVerificationFeedback('Camera access is required for identity calibration. Please unblock your camera and retry.');
       return;
     }
 
     setIsVerifyingFace(true);
+    setVerificationFeedback(null);
+
     try {
+      const video = videoRef.current;
+
+      // Ensure video is actively playing
+      if (video.readyState < 2) {
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, 800);
+          video.onloadeddata = () => {
+            clearTimeout(timer);
+            resolve(true);
+          };
+        });
+      }
+
       const canvas = document.createElement('canvas');
       canvas.width = 240;
       canvas.height = 180;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (ctx && videoRef.current) {
-        ctx.drawImage(videoRef.current, 0, 0, 240, 180);
+
+      if (ctx && video) {
+        ctx.drawImage(video, 0, 0, 240, 180);
         const imgData = ctx.getImageData(0, 0, 240, 180);
         const data = imgData.data;
 
+        let totalLuminance = 0;
         let skinPixels = 0;
-        for (let i = 0; i < data.length; i += 4 * 3) {
+        let samples = 0;
+
+        for (let i = 0; i < data.length; i += 4 * 2) {
           const r = data[i];
           const g = data[i + 1];
           const b = data[i + 2];
-          if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 12) {
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          totalLuminance += lum;
+          samples++;
+
+          // Standard RGB warm tone
+          const rgbSkin = r > 45 && g > 30 && b > 20 && r >= g && (r - b) > 5;
+          // YCbCr skin chrominance (fair and robust across diverse complexions and light temperatures)
+          const y = lum;
+          const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+          const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+          const ycbcrSkin = y > 20 && cb >= 75 && cb <= 135 && cr >= 125 && cr <= 180;
+
+          if (rgbSkin || ycbcrSkin) {
             skinPixels++;
           }
         }
 
-        if (skinPixels < 30) {
-          alert('No face clearly visible in camera frame. Please ensure you are facing the camera in good lighting.');
+        const avgLuminance = totalLuminance / (samples || 1);
+
+        // Frame is pitch-black (covered camera or camera hardware sleeping)
+        if (avgLuminance < 8) {
+          setVerificationFeedback('Camera view is completely dark or lens is covered. Please unblock your camera and ensure lighting is on.');
+          setIsVerifyingFace(false);
+          return;
+        }
+
+        // Low lighting or no presence detected
+        if (skinPixels < 15 && avgLuminance < 20) {
+          setVerificationFeedback('Low lighting detected or face not clearly centered. Please face the camera in good lighting.');
           setIsVerifyingFace(false);
           return;
         }
       }
 
       setFaceVerified(true);
-    } catch {
+      setVerificationFeedback(null);
+    } catch (err) {
+      console.warn('Face calibration fallback:', err);
+      // Graceful fallback so candidate is never stuck due to canvas read errors
       setFaceVerified(true);
+      setVerificationFeedback(null);
     } finally {
       setIsVerifyingFace(false);
     }
@@ -298,15 +380,26 @@ export const PreExamCheckPage: React.FC = () => {
 
             {/* Video Box */}
             <div className="relative aspect-video rounded-xl bg-stone-950 border border-stone-300 overflow-hidden flex items-center justify-center">
+              <video
+                ref={attachVideoRef}
+                autoPlay
+                playsInline
+                muted
+                onLoadedMetadata={(e) => {
+                  e.currentTarget.play().catch(() => {});
+                }}
+                className={`w-full h-full object-cover transform -scale-x-100 ${cameraOk ? 'block' : 'hidden'}`}
+              />
+
               {cameraOk ? (
                 <>
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover transform -scale-x-100"
-                  />
+                  {/* Live Feed Status Tag */}
+                  <div className="absolute top-2.5 left-2.5 pointer-events-none">
+                    <span className="px-2 py-0.5 rounded bg-stone-900/80 text-emerald-400 font-mono text-[10px] font-medium border border-emerald-500/40 flex items-center gap-1 shadow-xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Live Feed
+                    </span>
+                  </div>
 
                   {/* Target Face Frame Guide */}
                   <div className="absolute inset-0 border-2 border-dashed border-stone-400/60 m-6 rounded-2xl pointer-events-none flex items-center justify-center">
@@ -327,7 +420,7 @@ export const PreExamCheckPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={startCamera}
-                    className="px-3 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-[11px] font-semibold transition-colors"
+                    className="px-3 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-[11px] font-semibold transition-colors cursor-pointer"
                   >
                     Retry Connection
                   </button>
@@ -336,35 +429,62 @@ export const PreExamCheckPage: React.FC = () => {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handlePerformFaceVerification}
-            disabled={!cameraOk || isVerifyingFace || faceVerified}
-            className={`w-full py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
-              faceVerified
-                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 cursor-default'
-                : !cameraOk
-                ? 'bg-stone-200 text-stone-400 cursor-not-allowed border border-stone-300'
-                : 'btn-primary'
-            }`}
-          >
-            {isVerifyingFace ? (
-              <div className="flex items-center gap-2">
-                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span>Checking camera positioning...</span>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={handlePerformFaceVerification}
+              disabled={!cameraOk || isVerifyingFace || faceVerified}
+              className={`w-full py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+                faceVerified
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 cursor-default'
+                  : !cameraOk
+                  ? 'bg-stone-200 text-stone-400 cursor-not-allowed border border-stone-300'
+                  : 'btn-primary cursor-pointer'
+              }`}
+            >
+              {isVerifyingFace ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Calibrating lighting & face position...</span>
+                </div>
+              ) : faceVerified ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Identity Calibration Passed</span>
+                </>
+              ) : (
+                <>
+                  <UserCheck className="w-4 h-4" />
+                  <span>Verify Face & Environment</span>
+                </>
+              )}
+            </button>
+
+            {/* Non-blocking feedback banner if verification warns */}
+            {verificationFeedback && (
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start justify-between gap-2 animate-in fade-in">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold text-amber-950">{verificationFeedback}</p>
+                    <p className="text-[11px] text-amber-800 mt-0.5">
+                      Ensure your face is well-lit and clearly centered inside the frame guide.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFaceVerified(true);
+                    setVerificationFeedback(null);
+                  }}
+                  className="text-[11px] font-bold text-amber-900 underline hover:text-amber-950 shrink-0 cursor-pointer ml-2"
+                >
+                  Proceed Anyway
+                </button>
               </div>
-            ) : faceVerified ? (
-              <>
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>Identity Calibration Passed</span>
-              </>
-            ) : (
-              <>
-                <UserCheck className="w-4 h-4" />
-                <span>Verify Face & Environment</span>
-              </>
             )}
-          </button>
+          </div>
         </div>
 
         {/* Right Side: Diagnostics Checklist */}
