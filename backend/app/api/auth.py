@@ -194,3 +194,16 @@ async def create_demo_candidate(
 @router.get("/me", response_model=UserOut)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+@router.post("/setup-seed")
+async def trigger_seed(db: AsyncSession = Depends(get_db)):
+    """
+    Initializes database with default admin, paper setters, and mock exam if admin is missing.
+    """
+    admin_check = await db.execute(select(User).where(User.role == UserRole.ADMIN))
+    if admin_check.scalars().first():
+        return {"status": "already_seeded", "message": "Admin account already exists."}
+    
+    from seed import seed_data
+    await seed_data()
+    return {"status": "seeded", "message": "Database successfully initialized with Admin, Setters, and Practice Mock Exam."}

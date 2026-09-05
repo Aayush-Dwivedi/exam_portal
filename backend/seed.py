@@ -22,9 +22,9 @@ async def seed_data():
     async with AsyncSessionLocal() as db:
         # Check if already seeded
         from sqlalchemy.future import select
-        existing_users = await db.execute(select(User))
-        if existing_users.scalars().first():
-            print("Database already contains records. Skipping duplicate seeding.")
+        existing_admin = await db.execute(select(User).where(User.role == UserRole.ADMIN))
+        if existing_admin.scalars().first():
+            print("Database already contains admin records. Skipping duplicate seeding.")
             return
 
         # 1. USERS

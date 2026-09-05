@@ -45,22 +45,20 @@ async def lifespan(app: FastAPI):
     await upgrade_database_schema()
     logger.info("Database schemas verified.")
 
-    # Auto-seed if database has no records (e.g. freshly provisioned cloud PostgreSQL)
+    # Auto-seed if admin account is missing (e.g. freshly provisioned cloud PostgreSQL)
     try:
         from app.database.session import AsyncSessionLocal
         from sqlalchemy.future import select
-        from app.models import User
+        from app.models import User, UserRole
         async with AsyncSessionLocal() as db:
-            res = await db.execute(select(User).limit(1))
+            res = await db.execute(select(User).where(User.role == UserRole.ADMIN).limit(1))
             if not res.scalars().first():
-                logger.info("Empty database detected. Initializing admin account and mock exams...")
+                logger.info("Admin user not found. Initializing admin account and mock exams...")
                 from seed import seed_data
                 await seed_data()
-                from create_dummy_exam import create_dummy_exam
-                await create_dummy_exam()
                 logger.info("Initial database seeding completed successfully.")
     except Exception as ex:
-        logger.warning(f"Database auto-seed check skipped or encountered note: {ex}")
+        logger.warning(f"Database auto-seed check note: {ex}")
 
     yield
     logger.info("Shutting down Exam Portal Backend Services...")
